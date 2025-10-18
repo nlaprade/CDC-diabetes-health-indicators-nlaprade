@@ -6,6 +6,8 @@ Dataset: https://archive.ics.uci.edu/dataset/891/cdc+diabetes+health+indicators
 """
 
 import os
+import shap
+import pickle
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
@@ -22,6 +24,7 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 data_path = os.path.join(BASE_DIR, "data", "diabetes_012_health_indicators_BRFSS2015.csv")
 graphs_dir = os.path.join(BASE_DIR, "graphs")
+models_dir = os.path.join(BASE_DIR, "models")
 
 # --- Read CSV ---
 df = pd.read_csv(data_path)
@@ -108,6 +111,8 @@ for col in df.columns:
     print(f"{col}: {unique_vals}")
 """
 
+# --- BMI Distribution Plot ---
+
 plt.figure(figsize=(10, 6))
 sns.histplot(df["BMI"], bins=30, kde=True, color="skyblue")
 plt.title("BMI Distribution")
@@ -128,31 +133,39 @@ df["HighBP_HDA"] = df["HighBP"] + df["HeartDiseaseorAttack"]
 df["BMI_Age"] = df["BMI"] * df["Age"]
 df["GenHlth_Phys"] = df["GenHlth"] * df["PhysActivity"]
 
+# --- Dropping Low Corellation Columns
+#low_corr = (df.corr(numeric_only=True)["Diabetes_012"].abs() < 0.05)
+#df = df.drop(columns=low_corr[low_corr].index)
+
 # --- Splitting Data ---
 X = df.drop("Diabetes_012", axis=1)
 y = df["Diabetes_012"]
 
-# --- Convert to binary: combine prediabetes (1.0) with diabetes (2.0) ---
-y_binary = y.replace({1.0: 1.0, 2.0: 1.0})
+# --- Convert to binary: isolate prediabetes (1.0) vs healthy (0.0)
+# Drop diabetes cases (2.0) for clean binary classification
+df_filtered = df[df["Diabetes_012"].isin([0.0, 1.0])]
+X = df_filtered.drop("Diabetes_012", axis=1)
+y_prediabetes = df_filtered["Diabetes_012"]
 
 # --- Train-test split ---
-X_train, X_test, y_train, y_test = train_test_split(X, y_binary, test_size=0.3, random_state=42, stratify=y_binary)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y_prediabetes, test_size=0.3, random_state=42, stratify=y_prediabetes
+)
 
 # --- Apply SMOTE ---
-smote = SMOTE(random_state=42)
-X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)
+from imblearn.combine import SMOTETomek
+X_train_bal, y_train_bal = SMOTETomek(random_state=42).fit_resample(X_train, y_train)
 
 # --- Train XGBoost ---
-neg_count = (y_binary == 0).sum()
-pos_count = (y_binary == 1).sum()
+neg_count = (y_prediabetes == 0).sum()
+pos_count = (y_prediabetes == 1).sum()
 scale_pos_weight = neg_count / pos_count
-
 
 xgb_model = XGBClassifier(
     n_estimators=500,
     learning_rate=0.05,
     max_depth=12,
-    scale_pos_weight=scale_pos_weight,  # Try different values (e.g., 3–10)
+    scale_pos_weight=scale_pos_weight,
     random_state=42,
     eval_metric='logloss'
 )
@@ -173,21 +186,44 @@ plt.ylabel("Actual")
 plt.title("Confusion Matrix")
 plt.show()
 
-# Apply custom threshold
+# --- Probabilistic Risk Scoring ---
+# Get predicted probabilities for class 1.0 (prediabetes)
 y_probs = xgb_model.predict_proba(X_test)[:, 1]
-y_pred_thresh = (y_probs >= 0.65).astype(int)
 
-# Re-evaluate
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+# Create risk tiers
+risk_labels = pd.cut(
+    y_probs,
+    bins=[0, 0.2, 0.5, 0.8, 1.0],
+    labels=["Low", "Moderate", "High", "Very High"]
+)
 
-print("Accuracy:", accuracy_score(y_test, y_pred_thresh))
-print("\nClassification Report:\n", classification_report(y_test, y_pred_thresh, zero_division=0))
+# Attach risk scores and tiers to test set
+X_test_risk = X_test.copy()
+X_test_risk["PredictedRisk"] = y_probs
+X_test_risk["RiskTier"] = risk_labels
 
-# Confusion matrix
-cm = confusion_matrix(y_test, y_pred_thresh)
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.title("Confusion Matrix (Threshold = 0.65)")
+# --- Visualize risk distribution ---
+plt.figure(figsize=(10, 6))
+sns.histplot(y_probs, bins=30, kde=True, color="salmon")
+plt.title("Predicted Prediabetes Risk Distribution")
+plt.xlabel("Risk Score")
+plt.ylabel("Frequency")
+plt.tight_layout()
 plt.show()
 
+explainer = shap.TreeExplainer(xgb_model)
+# --- Flag top 5% highest-risk individuals ---
+top_5_percent = X_test_risk.sort_values("PredictedRisk", ascending=False).head(int(0.05 * len(X_test_risk)))
+#print("\nTop 5% High-Risk Individuals:\n")
+#print(top_5_percent[["PredictedRisk", "RiskTier"]].head(10))
+
+# --- Optional: SHAP for top-risk cases ---
+top_sample = top_5_percent.drop(columns=["PredictedRisk", "RiskTier"])
+shap_values_top = explainer.shap_values(top_sample, check_additivity=False)
+
+shap.summary_plot(shap_values_top, top_sample)
+
+# --- Save model to models directory ---
+model_path = os.path.join(models_dir, "xgb_prediabetes_model.pkl")
+with open(model_path, "wb") as f:
+    pickle.dump(xgb_model, f)
