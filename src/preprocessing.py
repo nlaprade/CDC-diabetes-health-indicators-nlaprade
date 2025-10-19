@@ -17,14 +17,8 @@ from imblearn.combine import SMOTETomek
 from sklearn.model_selection import train_test_split
 from sklearn.utils import resample
 from sklearn.metrics import (classification_report, precision_recall_curve)
-from sklearn.ensemble import (
-    ExtraTreesClassifier,
-    GradientBoostingClassifier,
-    HistGradientBoostingClassifier,
-    AdaBoostClassifier
-)
+from sklearn.ensemble import (ExtraTreesClassifier, GradientBoostingClassifier, HistGradientBoostingClassifier, AdaBoostClassifier)
 from sklearn.ensemble import RandomForestClassifier
-from catboost import CatBoostClassifier
 from xgboost import XGBClassifier
 
 # --- Directories ---
@@ -37,6 +31,8 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 
 # --- Load Dataset ---
 df = pd.read_csv(DATA_PATH)
+
+print(df.info())
 
 # --- Exploratory Data Analysis ---
 # Correlation Heatmap
