@@ -189,7 +189,7 @@ results_df = evaluate_models(models, X_test, y_test, thresholds)
 
 # --- Model Comparison Section ---
 st.subheader("📊 Model Performance Comparison")
-st.dataframe(results_df, use_container_width=True)
+st.dataframe(results_df, width="stretch")
 
 with st.expander("🧠 Why These Models?"):
     col1, col2 = st.columns(2)
@@ -261,7 +261,7 @@ if selected_model_name != st.session_state.last_selected_model:
             time.sleep(0.1)  # Simulate work
             progress_bar.progress(percent_complete)
         progress_bar.empty()
-    st.toast(f"✅ Successfully switched to **{selected_model_name}** and recalculated SHAP values!")
+    st.toast(f"✅ Successfully switched to **{selected_model_name}** and recalculated SHAP values! Please wait for the modules to be available.")
     time.sleep(5)
     st.session_state.last_selected_model = selected_model_name
 
@@ -732,7 +732,7 @@ with st.expander("📊 Confusion Matrix - Model Performance"):
             ### **Overall Metrics**
             - **Accuracy**: `{acc * 100:.2f}%`
             - **Precision**: `{prec * 100:.2f}%`
-            - **Recall (Sensitivity)**: `{rec * 100:.2f}%`
+            - **Recall**: `{rec * 100:.2f}%`
             - **F1 Score**: `{f1 * 100:.2f}%`
 
             ---
@@ -752,7 +752,7 @@ with st.expander("📊 Confusion Matrix - Model Performance"):
         disp.plot(ax=ax, cmap="Blues", colorbar=False)
         ax.set_title("")
         plt.tight_layout(pad=0.5)
-        st.pyplot(fig_cm, use_container_width=False)
+        st.pyplot(fig_cm, width="content")
 
 st.subheader("🛠️ Preprocessing & Modeling")
 with st.expander("⚙️ How the Models Were Built"):
@@ -799,7 +799,16 @@ with st.expander("⚙️ How the Models Were Built"):
 
 # --- Download SHAP Values ---
 st.subheader("📥 Download SHAP Values")
-shap_df = pd.DataFrame(shap_values, columns=feature_names)
+
+if len(shap_values.shape) == 3:
+    # Multi-class model (e.g., RandomForest)
+    flat_values = shap_values.reshape(shap_values.shape[0], -1)
+    flat_columns = [f"{feat}_class{c}" for c in range(shap_values.shape[2]) for feat in feature_names]
+    shap_df = pd.DataFrame(flat_values, columns=flat_columns)
+else:
+    # Binary or regression model
+    shap_df = pd.DataFrame(shap_values, columns=feature_names)
+
 csv = shap_df.to_csv(index=False).encode("utf-8")
 st.download_button("Download SHAP values as CSV", data=csv, file_name=f"{selected_model_name}_shap_values_prediabetes.csv", mime="text/csv")
 
