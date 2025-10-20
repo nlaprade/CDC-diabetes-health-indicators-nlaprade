@@ -15,12 +15,14 @@ os.environ["LOKY_MAX_CPU_COUNT"] = "8"  # or whatever number of cores you want
 
 import shap
 import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
 from imblearn.combine import SMOTETomek
 from sklearn.utils import resample
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+shap.initjs()
 
 # --- Streamlit Setup ---
 st.set_page_config(
@@ -95,8 +97,7 @@ model_paths = {
     "Random Forest": os.path.join(BASE_DIR, "models", "randomforest_prediabetes_model.pkl"),
     "Extra Trees": os.path.join(BASE_DIR, "models", "extratrees_prediabetes_model.pkl"),
     "HistGradientBoosting": os.path.join(BASE_DIR, "models", "histgb_prediabetes_model.pkl"),
-    "Gradient Boosting": os.path.join(BASE_DIR, "models", "gradientboosting_prediabetes_model.pkl"),
-    "AdaBoost": os.path.join(BASE_DIR, "models", "adaboost_prediabetes_model.pkl")
+    "Gradient Boosting": os.path.join(BASE_DIR, "models", "gradientboosting_prediabetes_model.pkl")
 }
 
 # --- Load Models ---
@@ -138,15 +139,15 @@ original_cols = [
 
 # --- Preprocessing ---
 def preprocessing(df):
-    df["BMI_Outlier"] = (np.abs(df["BMI"]) > 3).astype(int)
+    df["BMI_Outlier"] = (df["BMI"] > 50).astype(int)
     df["LowActivity_HighBMI"] = ((df["PhysActivity"] == 0) & (df["BMI"] > 30)).astype(int)
     df["LogBMI"] = np.log1p(df["BMI"])
-    df["Income_Age"] = df["Income"] / (df["Age"] + 1)
     df["DistressCombo"] = (df["MentHlth"] + df["PhysHlth"]) * (df["GenHlth"] >= 4)
     df["SocioEconBurden"] = ((df["Income"] <= 3).astype(int) + (df["Education"] <= 2).astype(int) + (df["NoDocbcCost"] == 1).astype(int))
     df["LowEdu"] = (df["Education"] <= 2).astype(int)
     df["BMI_GenHlth"] = df["BMI"] * df["GenHlth"]
     df["CardioRisk"] = df["HighBP"] + df["HighChol"] + df["HeartDiseaseorAttack"]
+    #df["Income_Age"] = df["Income"] / (df["Age"] + 1)
 
     df_filtered = df[df["Diabetes_012"].isin([0.0, 1.0])]
     df_majority = df_filtered[df_filtered["Diabetes_012"] == 0.0]
@@ -325,10 +326,9 @@ with st.expander("🧮 Predict Risk from User Input"):
         }])
 
         # Apply engineered features
-        input_df["BMI_Outlier"] = (np.abs(input_df["BMI"]) > 3).astype(int)
+        input_df["BMI_Outlier"] = (input_df["BMI"] > 50).astype(int)
         input_df["LowActivity_HighBMI"] = ((input_df["PhysActivity"] == 0) & (input_df["BMI"] > 30)).astype(int)
         input_df["LogBMI"] = np.log1p(input_df["BMI"])
-        input_df["Income_Age"] = input_df["Income"] / (input_df["Age"] + 1)
         input_df["DistressCombo"] = (input_df["MentHlth"] + input_df["PhysHlth"]) * (input_df["GenHlth"] >= 4)
         input_df["SocioEconBurden"] = ((input_df["Income"] <= 3).astype(int) + (input_df["Education"] <= 2).astype(int) + (input_df["NoDocbcCost"] == 1).astype(int))
         input_df["LowEdu"] = (input_df["Education"] <= 2).astype(int)
@@ -363,3 +363,152 @@ with st.expander("❗ What are SHAP Values?"):
     📊 **In this dashboard**, SHAP values show how your input features (like BMI, Income, Age, etc.) influence the predicted price — positively or negatively.
 
     """)
+
+# --- SHAP Interpretability Section ---
+with st.expander("📈 SHAP Summary & Feature Importance"):
+    sample_size = min(50, len(X_test))
+    X_sample = X_test.sample(sample_size, random_state=42)
+
+    def compute_shap_values(model, X_sample):
+        """Robust SHAP computation across tree and non-tree models."""
+        model_name = type(model).__name__
+
+        tree_models = [
+            "RandomForestClassifier",
+            "ExtraTreesClassifier",
+            "GradientBoostingClassifier",
+            "HistGradientBoostingClassifier",
+            "XGBClassifier"
+        ]
+
+        if model_name in tree_models:
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_sample)
+
+            if isinstance(shap_values, list):
+                shap_array = np.mean(np.array(shap_values), axis=0)
+            else:
+                shap_array = shap_values
+
+            return shap_array, X_sample.columns.tolist()
+
+        try:
+            explainer = shap.Explainer(model, X_sample)
+            shap_values = explainer(X_sample)
+            return shap_values, X_sample.columns.tolist()
+        except Exception as e:
+            st.error(f"SHAP explainer failed: {e}")
+            return None, X_sample.columns.tolist()
+
+    shap_values, feature_names = compute_shap_values(selected_model, X_sample)
+
+    if shap_values is not None:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### SHAP Summary Plot")
+            fig_summary, ax = plt.subplots(figsize=(6, 4))
+            try:
+                shap.summary_plot(
+                    shap_values,
+                    X_sample.values,
+                    show=False,
+                    plot_size=(10, 8),
+                    feature_names=np.array(feature_names)
+                )
+                st.pyplot(fig_summary)
+            except Exception as e:
+                st.error(f"SHAP summary plot failed: {e}")
+            plt.close()
+
+        with col2:
+            st.markdown("##### SHAP Feature Importance")
+            fig_bar, ax = plt.subplots(figsize=(6, 4))
+            try:
+                raw_values = shap_values.values if hasattr(shap_values, "values") else shap_values
+                shap.summary_plot(
+                    np.abs(raw_values),
+                    X_sample.values,
+                    show=False,
+                    plot_type="bar",
+                    plot_size=(10, 8),
+                    feature_names=np.array(feature_names)
+                )
+                st.pyplot(fig_bar)
+            except Exception as e:
+                st.error(f"SHAP feature importance plot failed: {e}")
+            plt.close()
+
+# --- SHAP Dependence & Waterfall Section ---
+with st.expander("🔍 SHAP Dependence & Waterfall Analysis"):
+    col1, col2 = st.columns(2)
+
+    # --- Dependence Plot ---
+    with col1:
+        st.markdown("##### SHAP Dependence Plot")
+
+        display_labels = [col for col in X_sample.columns]
+
+        # Session state setup
+        if "selected_feature" not in st.session_state:
+            st.session_state.selected_feature = display_labels[0]
+        if "color_feature" not in st.session_state:
+            st.session_state.color_feature = display_labels[1]
+
+        selected_label = st.selectbox("Feature to analyze", display_labels, index=0)
+        color_label = st.selectbox("Color by feature", display_labels, index=1)
+
+        selected_feature = selected_label
+        color_feature = color_label
+
+        st.session_state.selected_feature = selected_label
+        st.session_state.color_feature = color_label
+
+        fig_dep, ax = plt.subplots(figsize=(5, 3))
+        try:
+            shap.dependence_plot(
+                selected_feature,
+                shap_values.values if hasattr(shap_values, "values") else shap_values,
+                X_sample,
+                interaction_index=color_feature,
+                show=False,
+                ax=ax
+            )
+            st.pyplot(fig_dep)
+        except Exception as e:
+            st.error(f"Dependence plot failed: {e}")
+        plt.close()
+
+    # --- Decision Plot ---
+    
+    with col2:
+        st.markdown("##### SHAP Decision Plot")
+        sample_index = st.slider("Select test sample index", 0, len(X_sample) - 1, 0)
+        try:
+            fig_decision, ax = plt.subplots(figsize=(6, 4))
+            shap.decision_plot(
+                base_value=shap_values.base_values[sample_index] if hasattr(shap_values, "base_values") else np.mean(shap_values),
+                shap_values=shap_values[sample_index],
+                feature_names=list(X_sample.columns),
+                feature_order="importance",
+                show=False
+            )
+            st.pyplot(fig_decision)
+        except Exception as e:
+            st.error(f"Decision plot failed: {e}")
+        plt.close()
+    
+    with st.expander("🩺 Feature Values for Selected Sample"):
+        sample_data = X_sample.iloc[sample_index]
+        sample_df = pd.DataFrame({
+            "Feature": sample_data.index,
+            "Value": sample_data.values
+        })
+        st.dataframe(sample_df)
+
+
+
+
+
+
+

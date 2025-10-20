@@ -53,10 +53,9 @@ plt.savefig(os.path.join(GRAPHS_DIR, "bmi_dist.png"))
 plt.close()
 
 # --- Feature Engineering ---
-df["BMI_Outlier"] = (np.abs(df["BMI"]) > 3).astype(int)
+df["BMI_Outlier"] = (df["BMI"] > 50).astype(int)
 df["LowActivity_HighBMI"] = ((df["PhysActivity"] == 0) & (df["BMI"] > 30)).astype(int)
 df["LogBMI"] = np.log1p(df["BMI"])
-df["Income_Age"] = df["Income"] / (df["Age"] + 1)
 df["DistressCombo"] = (df["MentHlth"] + df["PhysHlth"]) * (df["GenHlth"] >= 4)
 df["SocioEconBurden"] = ((df["Income"] <= 3).astype(int) + (df["Education"] <= 2).astype(int) + (df["NoDocbcCost"] == 1).astype(int))
 df["LowEdu"] = (df["Education"] <= 2).astype(int)
@@ -98,7 +97,7 @@ models = {
     "XGBoost": XGBClassifier(n_estimators=2500, learning_rate=0.005, max_depth=6, subsample=0.8, random_state=42, eval_metric="logloss"),
     "ExtraTrees": ExtraTreesClassifier(n_estimators=1000, max_depth=6, min_samples_split=5, random_state=42),
     "HistGB": HistGradientBoostingClassifier(max_iter=2500, learning_rate=0.01, max_depth=6, random_state=42),
-    "GradientBoosting": GradientBoostingClassifier(n_estimators=2500, learning_rate=0.005, subsample=0.8,  max_depth=6, random_state=42),
+    "GradientBoosting": GradientBoostingClassifier(n_estimators=1000, learning_rate=0.005, subsample=0.8,  max_depth=6, random_state=42),
     "AdaBoost": AdaBoostClassifier(n_estimators=500, learning_rate=0.5, random_state=42)
 }
 results = {}
