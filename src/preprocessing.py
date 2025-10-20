@@ -20,6 +20,7 @@ from sklearn.metrics import (classification_report, precision_recall_curve)
 from sklearn.ensemble import (ExtraTreesClassifier, GradientBoostingClassifier, HistGradientBoostingClassifier, AdaBoostClassifier)
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
+from sklearn.tree import DecisionTreeClassifier
 
 # --- Directories ---
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
@@ -69,7 +70,7 @@ df_minority = df_filtered[df_filtered["Diabetes_012"] == 1.0]
 
 # Downsample majority (2:1 ratio)
 df_majority_downsampled = resample(
-    df_majority, replace=False, n_samples=2 * len(df_minority), random_state=42
+    df_majority, replace=False, n_samples=len(df_minority), random_state=42
 )
 df_balanced = pd.concat([df_majority_downsampled, df_minority]).sample(frac=1, random_state=42)
 
@@ -93,37 +94,113 @@ print(pd.Series(y_train_bal).value_counts())
 
 # --- Model Benchmarking ---
 models = {
-    "RandomForest": RandomForestClassifier(n_estimators=1000, max_depth=6, random_state=42),
-    "XGBoost": XGBClassifier(n_estimators=2500, learning_rate=0.005, max_depth=6, subsample=0.8, random_state=42, eval_metric="logloss"),
-    "ExtraTrees": ExtraTreesClassifier(n_estimators=1000, max_depth=6, min_samples_split=5, random_state=42),
-    "HistGB": HistGradientBoostingClassifier(max_iter=2500, learning_rate=0.01, max_depth=6, random_state=42),
-    "GradientBoosting": GradientBoostingClassifier(n_estimators=1000, learning_rate=0.005, subsample=0.8,  max_depth=6, random_state=42),
-    "AdaBoost": AdaBoostClassifier(n_estimators=500, learning_rate=0.5, random_state=42)
+    "RandomForest": RandomForestClassifier(
+        n_estimators=1000,
+        max_depth=None,  # allow full depth
+        min_samples_leaf=10,  # reduce overfitting
+        max_features="sqrt",  # add randomness
+        class_weight="balanced",  # handle imbalance
+        random_state=42
+    ),
+
+    "XGBoost": XGBClassifier(
+        n_estimators=2500,
+        learning_rate=0.005,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,  # reduce feature correlation
+        reg_alpha=0.1,         # L1 regularization
+        reg_lambda=1.0,        # L2 regularization
+        scale_pos_weight=2.0,  # adjust for class imbalance
+        random_state=42,
+        eval_metric="logloss"
+    ),
+
+    "ExtraTrees": ExtraTreesClassifier(
+        n_estimators=1000,
+        max_depth=None,  # allow full depth
+        min_samples_split=10,  # reduce overfitting
+        min_samples_leaf=10,
+        max_features="sqrt",
+        random_state=42
+    ),
+
+    "HistGB": HistGradientBoostingClassifier(
+        max_iter=2500,
+        learning_rate=0.01,
+        max_depth=6,
+        l2_regularization=1.0,  # smooth predictions
+        max_leaf_nodes=32,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=50,
+        random_state=42
+    ),
+
+    "GradientBoosting": GradientBoostingClassifier(
+        n_estimators=1000,
+        learning_rate=0.005,
+        subsample=0.8,
+        max_depth=6,
+        min_samples_split=10,
+        min_samples_leaf=20,
+        validation_fraction=0.1,
+        n_iter_no_change=50,
+        random_state=42
+    ),
+
+    "AdaBoost": AdaBoostClassifier(
+        estimator=DecisionTreeClassifier(max_depth=1),  # classic weak learner
+        n_estimators=500,
+        learning_rate=0.1,  # smoother updates
+        algorithm="SAMME",
+        random_state=42
+    )
 }
 results = {}
 
+from sklearn.model_selection import StratifiedKFold
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
 for name, model in models.items():
     print(f"\n--- Training {name} ---")
-    model.fit(X_train_bal, y_train_bal)
+    fold_metrics = []
 
-    y_probs = model.predict_proba(X_test)[:, 1]
-    precision, recall, thresholds = precision_recall_curve(y_test, y_probs)
-    f1_scores = 2 * precision * recall / (precision + recall + 1e-8)
-    best_thresh = thresholds[f1_scores.argmax()]
-    y_pred = (y_probs >= best_thresh).astype(int)
+    for fold, (train_idx, val_idx) in enumerate(cv.split(X_train_bal, y_train_bal)):
+        print(f"\n📁 Fold {fold + 1}")
+        X_train_fold, X_val_fold = X_train_bal.iloc[train_idx], X_train_bal.iloc[val_idx]
+        y_train_fold, y_val_fold = y_train_bal.iloc[train_idx], y_train_bal.iloc[val_idx]
 
-    report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+        model.fit(X_train_fold, y_train_fold)
+
+        y_probs = model.predict_proba(X_test)[:, 1]
+        precision, recall, thresholds = precision_recall_curve(y_test, y_probs)
+        f1_scores = 2 * precision * recall / (precision + recall + 1e-8)
+        best_thresh = thresholds[f1_scores.argmax()]
+        y_pred = (y_probs >= best_thresh).astype(int)
+
+        report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+        fold_metrics.append({
+            "F1": f1_scores.max(),
+            "Precision": precision[f1_scores.argmax()],
+            "Recall": recall[f1_scores.argmax()],
+            "Threshold": best_thresh
+        })
+
+        print(f"\n{name} Fold {fold + 1} Classification Report:")
+        print(classification_report(y_test, y_pred, zero_division=0))
+
+    # Aggregate fold metrics
+    avg_metrics = pd.DataFrame(fold_metrics).mean().to_dict()
     results[name] = {
-        "F1": f1_scores.max(),
-        "Precision": precision[f1_scores.argmax()],
-        "Recall": recall[f1_scores.argmax()],
-        "Threshold": best_thresh,
+        "F1": avg_metrics["F1"],
+        "Precision": avg_metrics["Precision"],
+        "Recall": avg_metrics["Recall"],
+        "Threshold": avg_metrics["Threshold"],
         "Probs": y_probs,
         "Model": model
     }
-
-    print(f"\n{name} Classification Report:")
-    print(classification_report(y_test, y_pred, zero_division=0))
 
 # --- Select Best Model ---
 best_model_name = max(results, key=lambda k: results[k]["F1"])
@@ -132,6 +209,7 @@ y_probs = results[best_model_name]["Probs"]
 best_thresh = results[best_model_name]["Threshold"]
 
 print(f"\n✅ Best model by F1 score: {best_model_name}")
+
 
 # --- Risk Tiering ---
 risk_labels = pd.Series(

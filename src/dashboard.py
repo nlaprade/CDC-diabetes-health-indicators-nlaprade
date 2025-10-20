@@ -18,7 +18,7 @@ import shap
 import matplotlib.pyplot as plt
 
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from imblearn.combine import SMOTETomek
+
 from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score
 from sklearn.utils import resample
 from sklearn.model_selection import train_test_split
@@ -162,15 +162,14 @@ def preprocessing(df):
     y = df_balanced["Diabetes_012"]
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
-    X_train_bal, y_train_bal = SMOTETomek(random_state=42).fit_resample(X_train, y_train)
-    
-    min_max_dict = {col: (X_train_bal[col].min(), X_train_bal[col].max()) for col in original_cols}
-    return X_train_bal, X_test, y_train_bal, y_test, min_max_dict
 
-X_train_bal, X_test, y_train_bal, y_test, min_max = preprocessing(df)
+    min_max_dict = {col: (X_train[col].min(), X_train[col].max()) for col in original_cols}
+    return X_train, X_test, y_train, y_test, min_max_dict
+
+X_train, X_test, y_train, y_test, min_max = preprocessing(df)
 
 # --- Evaluate Models ---
-def evaluate_models(models, X_test, y_test):
+def evaluate_models(models, X_test, y_test, thresholds):
     results = []
     for name, model in models.items():
         y_probs = model.predict_proba(X_test)[:, 1]
@@ -186,7 +185,7 @@ def evaluate_models(models, X_test, y_test):
 
     return pd.DataFrame(results).set_index("Model").round(2)
 
-results_df = evaluate_models(models, X_test, y_test)
+results_df = evaluate_models(models, X_test, y_test, thresholds)
 
 # --- Model Comparison Section ---
 st.subheader("📊 Model Performance Comparison")
@@ -197,6 +196,7 @@ with st.expander("🧠 Why These Models?"):
     with col1:
         st.markdown("""
         These models were chosen for their strong performance on structured health data and compatibility with SHAP for interpretability:
+           
         - **XGBoost**  
         A high-performance gradient boosting model known for its accuracy and speed. Widely used in clinical ML tasks due to its robustness and SHAP support.
 
@@ -235,7 +235,6 @@ with st.expander("🧠 Why These Models?"):
         - **Formula:**  
         **F1 Score** = 2 × (`Precision` × `Recall`) / (`Precision` + `Recall`)
         """)
-
 
 # Find the best model
 best_model_name = results_df["F1 Score"].idxmax()
@@ -580,7 +579,7 @@ with st.expander("📈 SHAP Summary & Feature Importance"):
             - **Color** = feature value (**red** = `high`, **blue** = `low`, **purple** = `mid`)  
             - **Position** = SHAP value (**left** = `negative`, **right** = `positive`)  
             - **Density** = importance across samples  
-
+            ---
             **Feature Importance Plot**  
             - Ranks features by average absolute SHAP value  
             - **Longer** bars = `higher` influence  
@@ -605,8 +604,8 @@ with st.expander("📈 SHAP Summary & Feature Importance"):
                 st.error(f"SHAP feature importance plot failed: {e}")
             plt.close()
 
-# --- SHAP Dependence & Waterfall Section ---
-with st.expander("🔍 SHAP Dependence & Waterfall Analysis"):
+# --- SHAP Dependence & Decision Section ---
+with st.expander("🔍 SHAP Dependence & Decision Analysis"):
     col1, col2 = st.columns(2)
 
     # --- Dependence Plot ---
@@ -680,7 +679,7 @@ with st.expander("🔍 SHAP Dependence & Waterfall Analysis"):
         - `Y-axis` = SHAP value (impact on prediction)  
         - `Color` = interaction with another feature  
         - Reveals non-linear effects and feature interactions
-
+        ---
         **Waterfall Plot**  
         - Breaks down how each feature pushes the prediction from the base value  
         - **Left to right** = cumulative SHAP contributions  
@@ -730,20 +729,21 @@ with st.expander("📊 Confusion Matrix - Model Performance"):
 
         with st.expander("📊 Performance Metrics"):
             st.markdown(f"""
-            **Overall Metrics**
-            - **Accuracy**: {acc:.3f}
-            - **Precision**: {prec:.3f}
-            - **Recall (Sensitivity)**: {rec:.3f}
-            - **Specificity**: {specificity:.3f}
-            - **F1 Score**: {f1:.3f}
+            ### **Overall Metrics**
+            - **Accuracy**: `{acc * 100:.2f}%`
+            - **Precision**: `{prec * 100:.2f}%`
+            - **Recall (Sensitivity)**: `{rec * 100:.2f}%`
+            - **F1 Score**: `{f1 * 100:.2f}%`
 
-            **Confusion Matrix Breakdown**
-            - **True Positives (`TP`)**: {tp}
-            - **True Negatives (`TN`)**: {tn}
-            - **False Positives (`FP`)**: {fp}
-            - **False Negatives (`FN`)**: {fn}
+            ---
+
+            ### **Confusion Matrix Breakdown**
+            - **True Positives (`TP`)**: `{tp}`
+            - **True Negatives (`TN`)**: `{tn}`
+            - **False Positives (`FP`)**: `{fp}`
+            - **False Negatives (`FN`)**: `{fn}`
             """)
-  
+
     with col2:
         cm = confusion_matrix(y_test, y_pred)
 
@@ -754,7 +754,7 @@ with st.expander("📊 Confusion Matrix - Model Performance"):
         plt.tight_layout(pad=0.5)
         st.pyplot(fig_cm, use_container_width=False)
 
-st.subheader("Preprocessing & Modeling")
+st.subheader("🛠️ Preprocessing & Modeling")
 with st.expander("⚙️ How the Models Were Built"):
     st.markdown("""
     This dashboard is powered by a modular pipeline designed for clinical clarity, reproducibility, and interpretability.
@@ -771,6 +771,8 @@ with st.expander("⚙️ How the Models Were Built"):
       - Log transforms, interaction terms, and outlier flags  
       - Dropped low-impact features (`Fruits`, `Veggies`)
 
+    ---
+                
     ### 🧠 Modeling Approach
     - Trained six models:  
       `XGBoost`, `Random Forest`, `Extra Trees`, `HistGradientBoosting`, `Gradient Boosting`, `AdaBoost`
@@ -778,11 +780,15 @@ with st.expander("⚙️ How the Models Were Built"):
     - Selected optimal thresholds using precision-recall curves and F1 maximization
     - Saved models and thresholds for dashboard deployment
 
+    ---
+                
     ### 📊 Evaluation & Risk Stratification
     - Benchmarked models on test set using F1, precision, recall
     - Assigned risk tiers: `Low`, `Moderate`, `High`, `Very High` based on predicted probabilities
     - Promoted borderline cases using SHAP impact from key features
 
+    ---
+                
     ### 🔍 Interpretability with SHAP
     - Used TreeExplainer for SHAP analysis across models
     - Visualized feature impact by risk tier and income level
