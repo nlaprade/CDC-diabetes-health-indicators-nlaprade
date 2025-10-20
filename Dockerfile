@@ -6,6 +6,7 @@ WORKDIR /app
 # Install system dependencies (for building some Python packages)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    python3-distutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install Python dependencies
