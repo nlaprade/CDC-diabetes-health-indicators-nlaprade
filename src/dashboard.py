@@ -10,14 +10,16 @@ import pickle
 import pandas as pd
 import numpy as np
 import os
+import time
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"  # or whatever number of cores you want
 
 import shap
 import matplotlib.pyplot as plt
-import streamlit.components.v1 as components
 
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from imblearn.combine import SMOTETomek
+from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score
 from sklearn.utils import resample
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -147,7 +149,6 @@ def preprocessing(df):
     df["LowEdu"] = (df["Education"] <= 2).astype(int)
     df["BMI_GenHlth"] = df["BMI"] * df["GenHlth"]
     df["CardioRisk"] = df["HighBP"] + df["HighChol"] + df["HeartDiseaseorAttack"]
-    #df["Income_Age"] = df["Income"] / (df["Age"] + 1)
 
     df_filtered = df[df["Diabetes_012"].isin([0.0, 1.0])]
     df_majority = df_filtered[df_filtered["Diabetes_012"] == 0.0]
@@ -189,22 +190,92 @@ results_df = evaluate_models(models, X_test, y_test)
 
 # --- Model Comparison Section ---
 st.subheader("📊 Model Performance Comparison")
-st.dataframe(results_df, width='stretch')
+st.dataframe(results_df, use_container_width=True)
 
+with st.expander("🧠 Why These Models?"):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        These models were chosen for their strong performance on structured health data and compatibility with SHAP for interpretability:
+        - **XGBoost**  
+        A high-performance gradient boosting model known for its accuracy and speed. Widely used in clinical ML tasks due to its robustness and SHAP support.
+
+        - **Random Forest**  
+        An ensemble of decision trees that reduces overfitting and handles feature interactions well. Offers reliable performance and intuitive feature importance.
+
+        - **Extra Trees**  
+        Similar to Random Forest but uses more randomness during tree construction. Often faster and can improve generalization.
+
+        - **HistGradientBoosting**  
+        A fast, scalable boosting model optimized for large datasets. Supports missing values natively and integrates well with SHAP.
+
+        - **Gradient Boosting**  
+        A classic boosting method that builds trees sequentially to correct errors. Included for comparison with more modern variants.
+
+        These models balance `predictive power`, `clinical transparency`, and `interpretability`, making them ideal for risk prediction in prediabetes.
+        """)
+    
+    with col2:
+        st.markdown("""
+        ### 📐 Metrics Explanation
+
+        - **Accuracy**  
+        Out of all predictions made, how many were correct.
+
+        - **Precision**  
+        Out of all the positive predictions made, how many were actually true.
+
+        - **Recall**  
+        Out of all the true positive cases, how many were correctly identified.
+
+        - **F1 Score**  
+        Combines `precision` and `recall` into a single metric.  
+        Useful when there's a **trade-off** between identifying positives and avoiding false alarms.
+
+        - **Formula:**  
+        **F1 Score** = 2 × (`Precision` × `Recall`) / (`Precision` + `Recall`)
+        """)
+
+
+# Find the best model
 best_model_name = results_df["F1 Score"].idxmax()
 st.success(f"🏆 Best Model: **{best_model_name}**")
 best_model = models[best_model_name]
 
+# Initialize session state if not set
+if "last_selected_model" not in st.session_state:
+    st.session_state.last_selected_model = best_model_name
+
+# Model selection
 selected_model_name = st.selectbox(
     "🔀 Select model for SHAP analysis",
     results_df.index.tolist(),
-    index=results_df.index.tolist().index(best_model_name)
+    index=results_df.index.tolist().index(st.session_state.last_selected_model)
 )
 selected_model = models[selected_model_name]
+
+# Handle model switching
+if selected_model_name != st.session_state.last_selected_model:
+    with st.spinner("🔄 Switching model and recalculating SHAP values..."):
+        progress_bar = st.progress(0)
+        for percent_complete in range(0, 101, 10):
+            time.sleep(0.1)  # Simulate work
+            progress_bar.progress(percent_complete)
+        progress_bar.empty()
+    st.toast(f"✅ Successfully switched to **{selected_model_name}** and recalculated SHAP values!")
+    time.sleep(5)
+    st.session_state.last_selected_model = selected_model_name
 
 # --- BMI Risk Classifier Section ---
 yes_no_map = {"Yes": 1.0, "No": 0.0}
 gender_map = {"Male": 1.0, "Female": 0.0}
+education_map = {"Never Attended/Kindergaten": 1, "Grades 1-8": 2, "Grades 11-12": 3, "Grade 12/GED": 4, "College 1-3 Years": 5, 
+                 "College 4 Years or More": 6}
+income_map = {"< $10,000": 1, "$10,000 - < $15,000": 2, "$15,000 - < $20,000": 3, "$20,000 - < $25,000": 4, "$25,000 - < $35,000": 5, 
+              "$35,000 - < $50,000": 6, "$50,000 - < $75,000": 7, "$75,000 or More": 8}
+
+age_map = {"18 - 24": 1, "25 - 29": 2, "30 - 34": 3, "35 - 39": 4, "40 - 44": 5, "45 - 49": 6, "50 - 54": 7, "55 - 59": 8, "60 - 64": 9, 
+           "65 - 69": 10, "70 - 74": 11, "75 - 79": 12, "80+": 13}
 
 def binary_input(label, help_text=""):
     choice = st.selectbox(label, ["Yes", "No"], index=1, help=help_text)
@@ -214,91 +285,91 @@ def gender_input(label, help_text=""):
     choice = st.selectbox(label, ["Male", "Female"], index=0, help=help_text)
     return gender_map[choice]
 
+def education_input(label, help_text=""):
+    choice = st.selectbox(label, ["Never Attended/Kindergaten", "Grades 1-8", "Grades 11-12", "Grade 12/GED", "College 1-3 Years", 
+                                  "College 4 Years or More"], index=0, help=help_text)
+    return education_map[choice]
+
+def income_input(label, help_text=""):
+    choice = st.selectbox(label, ["< $10,000", "$10,000 - < $15,000", "$15,000 - < $20,000", "$20,000 - < $25,000", "$25,000 - < $35,000", 
+                                  "$35,000 - < $50,000", "$50,000 - < $75,000", "$75,000 or More"], index=0, help=help_text)
+    return income_map[choice]
+
+def age_input(label, help_text=""):
+    choice = st.selectbox(label, ["18 - 24", "25 - 29", "30 - 34", "35 - 39", "40 - 44", "45 - 49", "50 - 54", "55 - 59", "60 - 64", "65 - 69",
+                                  "70 - 74", "75 - 79", "80+"], index=0, help=help_text)
+    return age_map[choice]
+
+def compute_single_shap(model, input_df):
+    model_name = type(model).__name__
+    tree_models = [
+        "RandomForestClassifier",
+        "ExtraTreesClassifier",
+        "GradientBoostingClassifier",
+        "HistGradientBoostingClassifier",
+        "XGBClassifier"
+    ]
+
+    if model_name in tree_models:
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(input_df)
+        return shap_values[1][0] if isinstance(shap_values, list) else shap_values[0], input_df.columns.tolist()
+
+    explainer = shap.Explainer(model, input_df)
+    shap_values = explainer(input_df)
+    return shap_values.values[0], input_df.columns.tolist()
+
+
 with st.expander("🧮 Predict Risk from User Input"):
     with st.form("risk_form"):
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("**Demographics**")
-            age_options = list(range(int(min_max["Age"][0]), int(min_max["Age"][1]) + 1))
-            age = st.selectbox("What is your age bracket (code)", age_options, index=4)
+            st.markdown("##### **Demographics**")
+            age = age_input("What is your age bracket?", help_text="Diabetes risk increases with age.")
+            sex = gender_input("What is your sex?", help_text="Sex differences may influence risk profiles and care access.")
+            education = education_input("What is your highest level of education?",
+                                        help_text="Lower education may correlate with reduced health literacy and access.")
+            income = income_input("What is your annual income range?", help_text="Lower income is linked to higher diabetes risk and care barriers.")
 
-            with st.expander("Age Bracket Reference"):
-                st.markdown("""
-                | Code | Age Range     |
-                |------|---------------|
-                | 1    | 18-24         |
-                | 2    | 25-29         |
-                | 3    | 30-34         |
-                | 4    | 35-39         |
-                | 5    | 40-44         |
-                | 6    | 45-49         |
-                | 7    | 50-54         |
-                | 8    | 55-59         |
-                | 9    | 60-64         |
-                | 10   | 65-69         |
-                | 11   | 70-74         |
-                | 12   | 75-79         |
-                | 13   | 80+           |
-                """)
-            sex = gender_input("What is your sex?")
-            education = st.selectbox("What is your highest level of education?", list(np.arange(1.0, 7.0)))
+            st.markdown("##### **Health History**")
+            high_bp = binary_input("Have you ever been diagnosed with high blood pressure?", help_text="This factor is linked to increased diabetes risk.")
+            high_chol = binary_input("Have you ever been diagnosed with high cholesterol?", help_text="Often correlates with metabolic syndrome.")
+            chol_check = binary_input("Have you had your cholesterol checked in the past 5 years?", help_text="May indicate engagement in preventive care.")
+            stroke = binary_input("Have you ever had a stroke?", help_text="History of stroke may reflect underlying vascular or metabolic issues.")
+            heart_disease = binary_input("Have you ever been diagnosed with heart disease or had a heart attack?",
+                                         help_text="Often co-occurs with diabetes and signals elevated cardiovascular risk.")
 
-            with st.expander("Education Bracket Reference"):
-                st.markdown("""
-                | Code | Education Level             |
-                |------|-----------------------------|
-                | 1    | Never attended/kindergarten |
-                | 2    | Grades 1 through 8          |
-                | 3    | Grades 9 through 11         |
-                | 4    | Grade 12 or GED             |
-                | 5    | College 1 year to 3 years   |
-                | 6    | College 4 years or more     |
-                """)
-            income = st.selectbox("What is your annual income range?", list(np.arange(1.0, 9.0)))
-            
-            with st.expander("Income Bracket Reference"):
-                st.markdown("""
-                | Code | Income Range Bracket |
-                |------|----------------------|
-                | 1    | < $10,000            |
-                | 2    | $10,000 - <$15,000   |
-                | 3    | $15,000 - <$20,000   |
-                | 4    | $20,000 - <$25,000   |
-                | 5    | $25,000 - <$35,000   |
-                | 6    | $35,000 - <$50,000   |
-                | 7    | $50,000 - <$75,000   |
-                | 8    | $75,000 or more      |
-                """)
-            st.markdown("**Health History**")
-            high_bp = binary_input("Have you ever been diagnosed with high blood pressure?")
-            high_chol = binary_input("Have you ever been diagnosed with high cholesterol?")
-            chol_check = binary_input("Have you had your cholesterol checked in the past 5 years?")
-            stroke = binary_input("Have you ever had a stroke?")
-            heart_disease = binary_input("Have you ever been diagnosed with heart disease or had a heart attack?")
-
+            st.markdown("##### **Physical & Mental Health**")
+            gen_health = st.slider("How would you rate your general health? (1 = Excellent → 5 = Poor)", min_value=1, max_value=5, value=1, step=1,
+                                   help="Self-rated health often reflects underlying chronic conditions.")
+            ment_health = st.slider("In the past 30 days, how many days was your mental health not good?", min_value=0, max_value=30, value=0, step=1,
+                                    help="Mental distress can influence lifestyle and self-care behaviors.")
+            phys_health = st.slider("PIn the past 30 days, how many days was your physical health not good?", min_value=0, max_value=30, value=0, step=1,
+                                    help="Physical limitations may reduce activity and increase metabolic risk.")
+            diff_walk = binary_input("Do you have difficulty walking or climbing stairs?",
+                                     help_text="Mobility issues often correlate with obesity and cardiovascular burden.")
         with col2:
-            st.markdown("**Physical & Mental Health**")
-            gen_health = st.selectbox("How would you rate your general health? (1 = Excellent → 5 = Poor)", [1.0, 2.0, 3.0, 4.0, 5.0], index=2)
-            ment_health = st.slider("In the past 30 days, how many days was your mental health not good?", min_value=0, max_value=30, value=5, step=1)
-            phys_health = st.slider("PIn the past 30 days, how many days was your physical health not good?", min_value=0, max_value=30, value=5, step=1)
-            diff_walk = binary_input("Do you have difficulty walking or climbing stairs?", "Difficulty walking or climbing stairs")
+            st.markdown("##### **Lifestyle & Behaviour**")
+            smoker = binary_input("Have you smoked at least 100 cigarettes in your life?",
+                                  help_text="Smoking history is associated with increased risk of chronic disease.")
+            phys_activity = binary_input("Do you engage in regular physical activity?",
+                                         help_text="Physical inactivity is a known contributor to insulin resistance.")
+            fruits = binary_input("Do you consume fruits at least once per day?",
+                                  help_text="Daily fruit intake supports metabolic health and may reduce diabetes risk.")
+            veggies = binary_input("Do you consume vegetables at least once per day?", help_text="Vegetable consumption is protective against chronic disease.")
+            alcohol = binary_input("Do you consume alcohol heavily?", help_text="Heavy alcohol use can impair glucose regulation and liver function.")
 
-            st.markdown("**Lifestyle & Behaviour**")
-            smoker = binary_input("Have you smoked at least 100 cigarettes in your life?")
-            phys_activity = binary_input("Do you engage in regular physical activity?")
-            fruits = binary_input("Do you consume fruits at least once per day?")
-            veggies = binary_input("Do you consume vegetables at least once per day?")
-            alcohol = binary_input("Do you consume alcohol heavily?")
+            st.markdown("##### **Access to Care**")
+            any_healthcare = binary_input("Do you have any form of health insurance or coverage?",
+                                          help_text="Access to care influences early detection and management of diabetes.")
+            no_doc_cost = binary_input("Have you ever avoided seeing a doctor due to cost?", help_text="May indicate barriers to preventive care.")
 
-            st.markdown("**Access to Care**")
-            any_healthcare = binary_input("Do you have any form of health insurance or coverage?")
-            no_doc_cost = binary_input("Have you ever avoided seeing a doctor due to cost?")
+            st.markdown("##### **Body Metrics**")
+            bmi = st.slider("What is your Body Mass Index (BMI)?", min_value=int(min_max["BMI"][0]), max_value=int(min_max["BMI"][1]), value=25, step=1, 
+                            help="Higher BMI is a strong predictor of metabolic and cardiovascular risk.")
 
-            st.markdown("**Body Metrics**")
-            bmi = st.slider("What is your Body Mass Index (BMI)?", min_value=int(min_max["BMI"][0]), max_value=int(min_max["BMI"][1]), value=25, step=1)
-
-        submitted = st.form_submit_button("Predict Risk")
+            submitted = st.form_submit_button("##### **Predict Risk**")
 
     if submitted:
         input_df = pd.DataFrame([{
@@ -342,9 +413,92 @@ with st.expander("🧮 Predict Risk from User Input"):
         threshold = thresholds.get(selected_model_name, 0.5)
         risk_score = model.predict_proba(input_df)[0][1]
         risk_label = pd.cut([risk_score], bins=[0, 0.15, 0.35, 0.6, 1.0], labels=["Low", "Moderate", "High", "Very High"])[0]
+        st.subheader("📈 Estimated Risk of Prediabetes")
 
-        st.metric(label="Predicted Risk Score", value=f"{risk_score:.3f}")
-        st.success(f"🩺 Risk Tier: **{risk_label}**")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric(
+                label="Predicted Risk Score",
+                value=f"{risk_score:.3f}",
+                help="""
+                    **Risk Tiering:**
+                    - 🟢 **Low**: 0.00 - 0.15  
+                    - 🟡 **Moderate**: 0.16 - 0.35  
+                    - 🟠 **High**: 0.36 - 0.60  
+                    - 🔴 **Very High**: 0.61 - 1.00  
+
+                    This score is not a diagnosis, it's a model-based estimate to explore how lifestyle, health history, 
+                    and access to care relate to prediabetes risk.
+                    """)
+
+            st.markdown("##### **Risk Tier:**")
+            if risk_label == "Low":
+                st.markdown("""
+                    **🟢 Low Risk**
+                    - This profile suggests a low estimated risk of prediabetes.
+                    - Maintain healthy habits:
+                        - Regular physical activity  
+                        -  Balanced nutrition  
+                        - Preventive care engagement
+                    """)
+            elif risk_label == "Moderate":
+                st.markdown("""
+                    **🟡 Moderate Risk**
+                    - This profile indicates a moderate estimated risk of prediabetes.
+                    - Consider reviewing lifestyle factors:
+                        - Physical activity  
+                        - Dietary habits  
+                        - Access to preventive care
+                    - Small changes can have a meaningful impact.
+                    """)
+            elif risk_label == "High":
+                st.markdown("""
+                    **🟠 High Risk**
+                    - This profile reflects a high estimated risk of prediabetes.
+                    - Multiple factors may be contributing:
+                        - Elevated BMI  
+                        - Blood pressure concerns  
+                        - Limited physical activity
+                    - Exploring these areas with a healthcare provider could be beneficial.
+                    """)
+            else:
+                st.markdown("""
+                    **🔴 Very High Risk**
+                    - This profile suggests a very high estimated risk of prediabetes.
+                    - Several risk factors may be interacting.
+                    - It may be helpful to:
+                        - Engage with a clinician  
+                        - Discuss personalized prevention strategies  
+                        - Explore early intervention options
+                    """)
+
+        with col2:    
+            shap_contribs, feature_names = compute_single_shap(models[selected_model_name], input_df)
+            top_indices = np.argsort(np.abs(shap_contribs))[::-1][:5]
+
+            st.markdown("##### 🔍 Top Contributors to Your Risk Score")
+            st.markdown("ℹ️ _Positive contributions raise the predicted risk; negative ones lower it._")
+
+            feature_aliases = {"BMI_Outlier": "BMI > 50", "LowActivity_HighBMI": "Low Activity + High BMI",
+                            "LogBMI": "Log-transformed BMI", "DistressCombo": "Mental + Physical Distress (if poor health)",
+                            "SocioEconBurden": "Low Income + Low Education + Cost Barrier", "LowEdu": "Low Education",
+                            "BMI_GenHlth": "BMI × General Health", "CardioRisk": "High BP + Cholesterol + Heart Disease"}
+
+            for idx in top_indices:
+                feature = feature_names[idx]
+                shap_val = shap_contribs[idx]
+                input_val = input_df.iloc[0][feature]
+                direction = "increased" if shap_val > 0 else "decreased"
+                emoji = "🔺" if shap_val > 0 else "🔻"
+
+                display_name = feature_aliases.get(feature, feature)
+                st.markdown(f"""
+                    - {emoji} **{display_name}** contributed **{shap_val:+.3f}** to your risk → This {direction} risk due to a value of **{input_val}**
+                    """)
+
+
+
 
 # --- Shap Explain Section ---
 st.subheader("📊 SHAP Interpretability")
@@ -360,13 +514,13 @@ with st.expander("❗ What are SHAP Values?"):
     🧠 **How does it work?**
     SHAP is based on game theory. Imagine each feature as a player in a game, and the prediction as the payout. SHAP calculates how much each feature contributes to the final prediction by comparing all possible combinations of features.
 
-    📊 **In this dashboard**, SHAP values show how your input features (like BMI, Income, Age, etc.) influence the predicted price — positively or negatively.
+    📊 **In this dashboard**, SHAP values show how your input features (like `BMI`, `Income`, `Age`, etc.) influence the predicted price — positively or negatively.
 
     """)
 
 # --- SHAP Interpretability Section ---
 with st.expander("📈 SHAP Summary & Feature Importance"):
-    sample_size = min(50, len(X_test))
+    sample_size = min(1000, len(X_test))
     X_sample = X_test.sample(sample_size, random_state=42)
 
     def compute_shap_values(model, X_sample):
@@ -420,6 +574,18 @@ with st.expander("📈 SHAP Summary & Feature Importance"):
             except Exception as e:
                 st.error(f"SHAP summary plot failed: {e}")
             plt.close()
+        with st.expander("ℹ️ What do these plots show?"):
+            st.markdown("""
+            **Summary Plot**  
+            - **Color** = feature value (**red** = `high`, **blue** = `low`, **purple** = `mid`)  
+            - **Position** = SHAP value (**left** = `negative`, **right** = `positive`)  
+            - **Density** = importance across samples  
+
+            **Feature Importance Plot**  
+            - Ranks features by average absolute SHAP value  
+            - **Longer** bars = `higher` influence  
+            - Helps identify top drivers of prediction
+            """)
 
         with col2:
             st.markdown("##### SHAP Feature Importance")
@@ -505,10 +671,139 @@ with st.expander("🔍 SHAP Dependence & Waterfall Analysis"):
             "Value": sample_data.values
         })
         st.dataframe(sample_df)
+    
+    with st.expander("ℹ️ What do these plots show?"):
+        st.markdown("""
+        **Dependence Plot**  
+        - Shows how a single feature’s value affects its SHAP contribution  
+        - `X-axis` = feature value  
+        - `Y-axis` = SHAP value (impact on prediction)  
+        - `Color` = interaction with another feature  
+        - Reveals non-linear effects and feature interactions
+
+        **Waterfall Plot**  
+        - Breaks down how each feature pushes the prediction from the base value  
+        - **Left to right** = cumulative SHAP contributions  
+        - Highlights the most influential features for a single prediction  
+        - Great for explaining individual risk scores
+        """)
+
+# --- Confusion Matrix Section
+st.subheader("🔢 Confusion Matrix")
+with st.expander("📊 Confusion Matrix - Model Performance"):
+    model = models[selected_model_name]
+    threshold = thresholds.get(selected_model_name, 0.5)
+
+    # Check if model supports predict_proba
+    if hasattr(model, "predict_proba"):
+        y_pred_proba = model.predict_proba(X_test)[:, 1]
+        y_pred = (y_pred_proba >= threshold).astype(int)
+    else:
+        # Fallback to decision_function or direct prediction
+        try:
+            y_pred_score = model.decision_function(X_test)
+            y_pred = (y_pred_score >= threshold).astype(int)
+        except AttributeError:
+            # fallback to hard prediction
+            y_pred = model.predict(X_test)
+    
+    # Compute metrics
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred)
+    rec = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    
+    tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+    specificity = tn / (tn + fp)
 
 
+    col1, col2 = st.columns(2)
 
+    with col1:
+        st.markdown("""
+        This matrix shows how well the model distinguishes between positive and negative cases.  
+        - **True Positives (`TP`)**: Correctly predicted positives  
+        - **True Negatives (`TN`)**: Correctly predicted negatives  
+        - **False Positives (`FP`)**: Predicted positive but actually negative  
+        - **False Negatives (`FN`)**: Predicted negative but actually positive
+        """)
 
+        with st.expander("📊 Performance Metrics"):
+            st.markdown(f"""
+            **Overall Metrics**
+            - **Accuracy**: {acc:.3f}
+            - **Precision**: {prec:.3f}
+            - **Recall (Sensitivity)**: {rec:.3f}
+            - **Specificity**: {specificity:.3f}
+            - **F1 Score**: {f1:.3f}
 
+            **Confusion Matrix Breakdown**
+            - **True Positives (`TP`)**: {tp}
+            - **True Negatives (`TN`)**: {tn}
+            - **False Positives (`FP`)**: {fp}
+            - **False Negatives (`FN`)**: {fn}
+            """)
+  
+    with col2:
+        cm = confusion_matrix(y_test, y_pred)
 
+        fig_cm, ax = plt.subplots(figsize=(4, 3))
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+        disp.plot(ax=ax, cmap="Blues", colorbar=False)
+        ax.set_title("")
+        plt.tight_layout(pad=0.5)
+        st.pyplot(fig_cm, use_container_width=False)
 
+st.subheader("Preprocessing & Modeling")
+with st.expander("⚙️ How the Models Were Built"):
+    st.markdown("""
+    This dashboard is powered by a modular pipeline designed for clinical clarity, reproducibility, and interpretability.
+
+    ### 🔄 Preprocessing Strategy
+    - **Dataset**: CDC Diabetes Health Indicators (BRFSS 2015)  
+      [View dataset](https://archive.ics.uci.edu/dataset/891/cdc+diabetes+health+indicators)
+    - **Target**: Binary classification — Healthy (0) vs Prediabetes (1)
+    - **Balancing**:  
+      - Downsampled majority class to 2:1 ratio  
+      - Applied SMOTETomek to training set for class balance
+    - **Feature Engineering**:  
+      - Composite features: `DistressCombo`, `SocioEconBurden`, `CardioRisk`  
+      - Log transforms, interaction terms, and outlier flags  
+      - Dropped low-impact features (`Fruits`, `Veggies`)
+
+    ### 🧠 Modeling Approach
+    - Trained six models:  
+      `XGBoost`, `Random Forest`, `Extra Trees`, `HistGradientBoosting`, `Gradient Boosting`, `AdaBoost`
+    - Tuned hyperparameters for depth, learning rate, and ensemble size
+    - Selected optimal thresholds using precision-recall curves and F1 maximization
+    - Saved models and thresholds for dashboard deployment
+
+    ### 📊 Evaluation & Risk Stratification
+    - Benchmarked models on test set using F1, precision, recall
+    - Assigned risk tiers: `Low`, `Moderate`, `High`, `Very High` based on predicted probabilities
+    - Promoted borderline cases using SHAP impact from key features
+
+    ### 🔍 Interpretability with SHAP
+    - Used TreeExplainer for SHAP analysis across models
+    - Visualized feature impact by risk tier and income level
+    - Compared SHAP skew between low-income and high-income groups
+
+    This pipeline ensures that predictions are not only accurate, but also explainable and clinically meaningful.
+    """)
+
+# --- Download SHAP Values ---
+st.subheader("📥 Download SHAP Values")
+shap_df = pd.DataFrame(shap_values, columns=feature_names)
+csv = shap_df.to_csv(index=False).encode("utf-8")
+st.download_button("Download SHAP values as CSV", data=csv, file_name=f"{selected_model_name}_shap_values_prediabetes.csv", mime="text/csv")
+
+# --- Streamlit Footer ---
+st.markdown("""
+<hr style="margin-top: 50px;">
+
+<div style='text-align: center; font-size: 0.9em; color: gray;'>
+    Built by Nicholas Laprade · 
+    <a href='https://www.linkedin.com/in/nicholas-laprade/' target='_blank'>LinkedIn</a> · 
+    <a href='https://github.com/nlaprade' target='_blank'>GitHub</a>
+</div>
+""", unsafe_allow_html=True)
