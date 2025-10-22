@@ -8,3 +8,4 @@ numpy
 joblib
 ipython
 imbalanced-learn
+setuptools
