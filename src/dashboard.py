@@ -93,6 +93,14 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "data", "diabetes_012_health_indicators_BRFSS2015.csv")
 MODEL_DIR = os.path.join(BASE_DIR, "models")
 
+st.sidebar.title("Navigation")
+
+st.sidebar.page_link("pages/SHAP_Overview.py", label="SHAP Overview")
+
+#st.sidebar.page_link("pages/SHAP_Global.py", label="Global Feature Impact")
+#st.sidebar.page_link("pages/SHAP_Interactions.py", label="Feature Interactions")
+#st.sidebar.page_link("pages/SHAP_Individual.py", label="Individual Prediction")
+
 # --- Model Paths ---
 model_paths = {
     "XGBoost": os.path.join(BASE_DIR, "models", "xgboost_prediabetes_model.pkl"),
@@ -516,6 +524,7 @@ with st.expander("❗ What are SHAP Values?"):
     📊 **In this dashboard**, SHAP values show how your input features (like `BMI`, `Income`, `Age`, etc.) influence the predicted price — positively or negatively.
 
     """)
+
 
 # --- SHAP Interpretability Section ---
 with st.expander("📈 SHAP Summary & Feature Importance"):
