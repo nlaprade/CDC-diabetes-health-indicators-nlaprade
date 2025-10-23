@@ -27,6 +27,7 @@ st.set_page_config(
 st.title("CDC Prediabetes Classification Dashboard")
 st.caption("Built for clinical insight, model benchmarking, and transparent feature attribution.")
 
+
 # --- Load Models ---
 model_paths = {
     "XGBoost": os.path.join(MODEL_DIR, "xgboost_prediabetes_model.pkl"),
@@ -43,36 +44,131 @@ X_train, X_test, y_train, y_test, min_max = preprocessing(df)
 
 # --- Load Thresholds ---
 threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
+
 if os.path.exists(threshold_path):
     with open(threshold_path, "rb") as f:
         thresholds = pickle.load(f)
 else:
     thresholds = {name: 0.5 for name in models}
 
-# --- Model Selection ---
-st.sidebar.title("Model Selection")
-
-# Track current model in session state
+# --- Initialize session state ---
 if "current_model" not in st.session_state:
     st.session_state.current_model = list(models.keys())[0]
 
-# Show model options
-selected_model = st.sidebar.selectbox(
-    "Choose Model",
-    list(models.keys()),
-    index=list(models.keys()).index(st.session_state.current_model)
-)
+if "temp_model" not in st.session_state:
+    st.session_state.temp_model = st.session_state.current_model
 
-# If user selects a different model, show warning and confirm button
-if selected_model != st.session_state.current_model:
-    st.sidebar.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
-    if st.sidebar.button("✅ Confirm Model Switch"):
-        st.session_state.current_model = selected_model
+if "model_switch_triggered" not in st.session_state:
+    st.session_state.model_switch_triggered = False
+
+# --- Callback to track selection change ---
+def on_model_change():
+    st.session_state.model_switch_triggered = True
+
+# --- Sidebar Content ---
+with st.sidebar:
+    st.subheader("Model Configuration")
+
+    # Model selector driven by temp_model
+    st.selectbox(
+        "Choose Model",
+        list(models.keys()),
+        index=list(models.keys()).index(st.session_state.temp_model),
+        key="model_selector",
+        on_change=on_model_change
+    )
+
+    # Update temp_model if user changed selection
+    if st.session_state.model_switch_triggered:
+        st.session_state.temp_model = st.session_state.model_selector
+
+    # Show confirm/cancel buttons only if temp_model differs from current_model
+    if st.session_state.temp_model != st.session_state.current_model:
+        st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
+        confirm_switch = st.button("✅ Confirm Model Switch")
+        cancel_switch = st.button("⛔ Cancel Model Change")
+
+        if confirm_switch:
+            st.session_state.current_model = st.session_state.temp_model
+            st.session_state.model_switch_triggered = False
+            st.toast(f"✅ Switched to {st.session_state.current_model}")
+            st.rerun()
+
+        elif cancel_switch:
+            st.session_state.temp_model = st.session_state.current_model
+            st.session_state.model_switch_triggered = False
+            st.toast("⛔ Model switch cancelled")
+            st.rerun()
+
+# --- Load thresholds from file ---
+threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
+if os.path.exists(threshold_path):
+    loaded_thresholds = pickle.load(open(threshold_path, "rb"))
+else:
+    loaded_thresholds = {name: 0.5 for name in models}
+
+# --- Initialize session state ---
+if "thresholds" not in st.session_state:
+    st.session_state.thresholds = loaded_thresholds.copy()
+
+# Ensure current model has a threshold
+current_model = st.session_state.current_model
+if current_model not in st.session_state.thresholds:
+    st.session_state.thresholds[current_model] = loaded_thresholds.get(current_model, 0.5)
+
+# Initialize slider value if missing
+if "threshold_slider" not in st.session_state:
+    st.session_state.threshold_slider = st.session_state.thresholds[current_model]
+
+# Initialize previous threshold for toast tracking
+if "prev_threshold" not in st.session_state:
+    st.session_state.prev_threshold = st.session_state.threshold_slider
+
+# --- Sidebar: Threshold Slider ---
+with st.sidebar:
+    st.subheader("Set Model Threshold")
+
+    # Initialize slider value only if not already set
+    if "threshold_slider" not in st.session_state or st.session_state.model_switch_triggered:
+        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
+        st.session_state.model_switch_triggered = False  # reset trigger after sync
+
+    # Render slider using session state only (no value=)
+    threshold = st.slider(
+        "Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        step=0.01,
+        key="threshold_slider"
+    )
+
+    # Show toast only if threshold changed and not just reset
+    if threshold != st.session_state.get("prev_threshold", threshold):
+        if not st.session_state.get("just_reset_thresholds", False):
+            st.toast(f"✅ Threshold changed to {threshold:.2f}")
+        st.session_state.prev_threshold = threshold
+
+    # Clear reset flag after use
+    if st.session_state.get("just_reset_thresholds", False):
+        del st.session_state["just_reset_thresholds"]
+
+    # Sync threshold to model
+    st.session_state.thresholds[current_model] = threshold
+
+    # --- Reset Button ---
+    if st.button("Reset Thresholds"):
+        st.session_state.thresholds = loaded_thresholds.copy()
+        st.session_state.just_reset_thresholds = True
+
+        # Reset slider for current model
+        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
+
+        st.toast("🔁 Thresholds reset to optimal value")
         st.rerun()
 
 # Use the confirmed model
 model = models[st.session_state.current_model]
-threshold = thresholds.get(st.session_state.current_model, 0.5)
+#threshold = thresholds.get(st.session_state.current_model, 0.5)
 
 # --- Tabs Layout ---
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Model Performance", "📁 Dataset Info", "🧪 Feature Engineering", "💽 Model Overview"])
@@ -92,7 +188,7 @@ with tab1:
         st.session_state.show_raw_metrics = not st.session_state.show_raw_metrics
 
     st.button(
-        f"🔄 Switch to {'Raw Counts' if not st.session_state.show_raw_metrics else 'Performance Metrics'}",
+        f"Switch to {'Raw Counts' if not st.session_state.show_raw_metrics else 'Performance Metrics'}",
         on_click=toggle_metrics
     )
 
@@ -211,21 +307,23 @@ Each was tuned for depth, learning rate, and ensemble size using cross-validatio
 ---
 
 ### Model Evaluation Highlights
-- **Accuracy:** Consistently high across folds, with XGBoost and HistGradientBoosting leading  
-- **F1 Score:** Optimized for borderline cases to reduce false negatives in high-risk groups  
-- **Calibration:** Probability outputs checked for clinical reliability and interpretability  
-- **SHAP Insights:** Top predictors include BMI, Age, and Blood Pressure, which aligns with clinical evidence
+- **`Accuracy`** Consistently high across folds, with XGBoost and HistGradientBoosting leading  
+- **`F1 Score`** Optimized for borderline cases to reduce false negatives in high-risk groups  
+- **`Calibration`** Probability outputs checked for clinical reliability and interpretability  
+- **`SHAP Insights`** Top predictors include BMI, Age, and Blood Pressure, which aligns with clinical evidence
 
 This approach ensures that predictions are not only accurate, but also explainable and clinically meaningful.
+
+---
+
+### Model Documentation
+- [XGBoost](https://xgboost.readthedocs.io/en/latest/)
+- [Random Forest (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)
+- [Extra Trees (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesClassifier.html)
+- [HistGradientBoosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingClassifier.html)
+- [Gradient Boosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)
 """)
-
-with st.sidebar.expander("Model Documentation"):
-    st.markdown("[XGBoost](https://xgboost.readthedocs.io/en/latest/)", unsafe_allow_html=True)
-    st.markdown("[Random Forest (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)", unsafe_allow_html=True)
-    st.markdown("[Extra Trees](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesClassifier.html)", unsafe_allow_html=True)
-    st.markdown("[HistGradientBoosting](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingClassifier.html)", unsafe_allow_html=True)
-    st.markdown("[Gradient Boosting](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)", unsafe_allow_html=True)
-
+    
 # --- Footer ---
 st.markdown("---")
 st.caption("Built by Nicholas Laprade — [LinkedIn](https://www.linkedin.com/in/nicholas-laprade) • [GitHub](https://github.com/nlaprade)")

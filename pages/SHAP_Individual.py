@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 import os
 import pickle
 
-from utils.paths import BASE_DIR, DATA_PATH, MODEL_DIR, IMAGES_DIR
+from utils.paths import DATA_PATH, MODEL_DIR, IMAGES_DIR
 from utils.data_utils import preprocessing, load_data
-from utils.model_utils import load_all_models, handle_model_selection
+from utils.model_utils import load_all_models
 from utils.predictor_utils import (
     binary_input, gender_input, education_input, income_input, age_input, compute_single_shap
 )
@@ -36,93 +36,192 @@ X_train, X_test, y_train, y_test, min_max = preprocessing(df)
 
 # --- Load Thresholds ---
 threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
+
 if os.path.exists(threshold_path):
     with open(threshold_path, "rb") as f:
         thresholds = pickle.load(f)
 else:
     thresholds = {name: 0.5 for name in models}
 
-# --- Model Selection ---
-st.sidebar.title("Model Selection")
-
-# Track current model in session state
+# --- Initialize session state ---
 if "current_model" not in st.session_state:
     st.session_state.current_model = list(models.keys())[0]
 
-# Show model options
-selected_model = st.sidebar.selectbox(
-    "Choose Model",
-    list(models.keys()),
-    index=list(models.keys()).index(st.session_state.current_model)
-)
+if "temp_model" not in st.session_state:
+    st.session_state.temp_model = st.session_state.current_model
 
-# If user selects a different model, show warning and confirm button
-if selected_model != st.session_state.current_model:
-    st.sidebar.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
-    if st.sidebar.button("✅ Confirm Model Switch"):
-        st.session_state.current_model = selected_model
+if "model_switch_triggered" not in st.session_state:
+    st.session_state.model_switch_triggered = False
+
+# --- Callback to track selection change ---
+def on_model_change():
+    st.session_state.model_switch_triggered = True
+
+# --- Sidebar Content ---
+with st.sidebar:
+    st.subheader("Model Configuration")
+
+    # Model selector driven by temp_model
+    st.selectbox(
+        "Choose Model",
+        list(models.keys()),
+        index=list(models.keys()).index(st.session_state.temp_model),
+        key="model_selector",
+        on_change=on_model_change
+    )
+
+    # Update temp_model if user changed selection
+    if st.session_state.model_switch_triggered:
+        st.session_state.temp_model = st.session_state.model_selector
+
+    # Show confirm/cancel buttons only if temp_model differs from current_model
+    if st.session_state.temp_model != st.session_state.current_model:
+        st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
+        confirm_switch = st.button("✅ Confirm Model Switch")
+        cancel_switch = st.button("⛔ Cancel Model Change")
+
+        if confirm_switch:
+            st.session_state.current_model = st.session_state.temp_model
+            st.session_state.model_switch_triggered = False
+            st.toast(f"✅ Switched to {st.session_state.current_model}")
+            st.rerun()
+
+        elif cancel_switch:
+            st.session_state.temp_model = st.session_state.current_model
+            st.session_state.model_switch_triggered = False
+            st.toast("⛔ Model switch cancelled")
+            st.rerun()
+
+# --- Load thresholds from file ---
+threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
+if os.path.exists(threshold_path):
+    loaded_thresholds = pickle.load(open(threshold_path, "rb"))
+else:
+    loaded_thresholds = {name: 0.5 for name in models}
+
+# --- Initialize thresholds dict ---
+if "thresholds" not in st.session_state:
+    st.session_state.thresholds = loaded_thresholds.copy()
+
+# --- Ensure current_model is set before using it ---
+current_model = st.session_state.get("current_model", next(iter(models)))
+
+# --- Ensure current_model has a threshold ---
+if current_model not in st.session_state.thresholds:
+    st.session_state.thresholds[current_model] = loaded_thresholds.get(current_model, 0.5)
+
+# --- Initialize slider value only after current_model is stable ---
+if "threshold_slider" not in st.session_state:
+    st.session_state.threshold_slider = st.session_state.thresholds[current_model]
+
+# Initialize previous threshold for toast tracking
+if "prev_threshold" not in st.session_state:
+    st.session_state.prev_threshold = st.session_state.threshold_slider
+
+# --- Sidebar: Threshold Slider ---
+with st.sidebar:
+    st.subheader("Set Model Threshold")
+
+    # Initialize slider value only if not already set
+    if "threshold_slider" not in st.session_state or st.session_state.model_switch_triggered:
+        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
+        st.session_state.model_switch_triggered = False  # reset trigger after sync
+
+    # Render slider using session state only (no value=)
+    threshold = st.slider(
+        "Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        step=0.01,
+        key="threshold_slider"
+    )
+
+    # Show toast only if threshold changed and not just reset
+    if threshold != st.session_state.get("prev_threshold", threshold):
+        if not st.session_state.get("just_reset_thresholds", False):
+            st.toast(f"✅ Threshold changed to {threshold:.2f}")
+        st.session_state.prev_threshold = threshold
+
+    # Clear reset flag after use
+    if st.session_state.get("just_reset_thresholds", False):
+        del st.session_state["just_reset_thresholds"]
+
+    # Sync threshold to model
+    st.session_state.thresholds[current_model] = threshold
+
+    # --- Reset Button ---
+    if st.button("Reset Thresholds"):
+        st.session_state.thresholds = loaded_thresholds.copy()
+        st.session_state.just_reset_thresholds = True
+
+        # Reset slider for current model
+        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
+
+        st.toast("🔁 Thresholds reset to optimal value")
         st.rerun()
 
-with st.form("risk_form"):
-    col1, col2 = st.columns([1, 1], gap="medium")
-
-    # --- Left Column ---
-    with col1:
-        with st.container():
+with st.container():
+    with st.form("risk_form"):
+        with st.container(border=True):
             st.markdown("### 🧍 Demographics")
+            st.caption("These questions help assess social determinants linked to diabetes risk.")
             age = age_input("What is your age bracket?", help_text="Diabetes risk increases with age.")
             sex = gender_input("What is your sex?", help_text="Sex differences may influence risk profiles and care access.")
             education = education_input("What is your highest level of education?", help_text="Lower education may correlate with reduced health literacy and access.")
             income = income_input("What is your annual income range?", help_text="Lower income is linked to higher diabetes risk and care barriers.")
 
-        st.markdown("---")
-
-        with st.container():
+        with st.container(border=True):
             st.markdown("### 🩺 Health History")
+            st.caption("These questions explore medical conditions commonly associated with elevated diabetes risk.")
             high_bp = binary_input("Have you ever been diagnosed with high blood pressure?", help_text="This factor is linked to increased diabetes risk.")
             high_chol = binary_input("Have you ever been diagnosed with high cholesterol?", help_text="Often correlates with metabolic syndrome.")
             chol_check = binary_input("Have you had your cholesterol checked in the past 5 years?", help_text="May indicate engagement in preventive care.")
             stroke = binary_input("Have you ever had a stroke?", help_text="History of stroke may reflect underlying vascular or metabolic issues.")
             heart_disease = binary_input("Have you ever been diagnosed with heart disease or had a heart attack?", help_text="Often co-occurs with diabetes and signals elevated cardiovascular risk.")
         
-        with st.container():
+        with st.container(border=True):
             st.markdown("### 💪 Physical & Mental Health")
+            st.caption("Self-rated health and recent symptoms help identify underlying risk factors.")
             gen_health = st.slider("How would you rate your general health? (1 = Excellent → 5 = Poor)", min_value=1, max_value=5, value=1, step=1,
-                                   help="Self-rated health often reflects underlying chronic conditions.")
+                                help="Self-rated health often reflects underlying chronic conditions.")
             ment_health = st.slider("In the past 30 days, how many days was your mental health not good?", min_value=0, max_value=30, value=0, step=1,
-                                    help="Mental distress can influence lifestyle and self-care behaviors.")
+                                help="Mental distress can influence lifestyle and self-care behaviors.")
             phys_health = st.slider("PIn the past 30 days, how many days was your physical health not good?", min_value=0, max_value=30, value=0, step=1,
-                                    help="Physical limitations may reduce activity and increase metabolic risk.")
+                                help="Physical limitations may reduce activity and increase metabolic risk.")
             diff_walk = binary_input("Do you have difficulty walking or climbing stairs?",
-                                     help_text="Mobility issues often correlate with obesity and cardiovascular burden.")
+                                help_text="Mobility issues often correlate with obesity and cardiovascular burden.")
 
-    # --- Right Column ---
-    with col2:
-        with st.container():
+        with st.container(border=True):
             st.markdown("### 🏃 Lifestyle & Behaviour")
+            st.caption("Daily habits and behaviors play a major role in metabolic health.")
             smoker = binary_input("Have you smoked at least 100 cigarettes in your life?", help_text="Smoking history is associated with increased risk of chronic disease.")
             phys_activity = binary_input("Do you engage in regular physical activity?", help_text="Physical inactivity is a known contributor to insulin resistance.")
             fruits = binary_input("Do you consume fruits at least once per day?", help_text="Daily fruit intake supports metabolic health and may reduce diabetes risk.")
             veggies = binary_input("Do you consume vegetables at least once per day?", help_text="Vegetable consumption is protective against chronic disease.")
             alcohol = binary_input("Do you consume alcohol heavily?", help_text="Heavy alcohol use can impair glucose regulation and liver function.")
 
-        st.markdown("---")
-
-        with st.container():
+        with st.container(border=True):
             st.markdown("### 🏥 Access to Care")
+            st.caption("Access and affordability of care affect early detection and disease management.")
             any_healthcare = binary_input("Do you have any form of health insurance or coverage?", help_text="Access to care influences early detection and management of diabetes.")
             no_doc_cost = binary_input("Have you ever avoided seeing a doctor due to cost?", help_text="May indicate barriers to preventive care.")
 
-        st.markdown("---")
-
-        with st.container():
+        with st.container(border=True):
             st.markdown("### ⚖️ Body Metrics")
+            st.caption("BMI is a strong predictor of metabolic and cardiovascular risk.")
             bmi = st.slider("What is your Body Mass Index (BMI)?", min_value=int(min_max["BMI"][0]), max_value=int(min_max["BMI"][1]), value=25, step=1, help="Higher BMI is a strong predictor of metabolic and cardiovascular risk.")
 
-    st.markdown("---")
-    submitted = st.form_submit_button("**Predict Risk**")
+        submitted = st.form_submit_button("**Predict Risk**")
 
-
+st.markdown("""
+    <style>
+    div[data-testid="stForm"] {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+    }</style>
+""", unsafe_allow_html=True)
 
 if submitted:
     input_df = pd.DataFrame([{
@@ -162,8 +261,9 @@ if submitted:
     input_df.drop(["Fruits", "Veggies"], axis=1, inplace=True)
 
     # Predict
-    model = models[selected_model]
-    threshold = thresholds.get(selected_model, 0.5)
+    model = models[current_model]
+    threshold = thresholds.get(current_model, 0.5)
+
     risk_score = model.predict_proba(input_df)[0][1]
     risk_label = pd.cut([risk_score], bins=[0, 0.15, 0.35, 0.6, 1.0], labels=["Low", "Moderate", "High", "Very High"])[0]
 
@@ -204,7 +304,7 @@ if submitted:
         st.markdown("---")
 
     with tab2:
-        shap_contribs, feature_names = compute_single_shap(models[selected_model], input_df)
+        shap_contribs, feature_names = compute_single_shap(models[current_model], input_df)
         top_indices = np.argsort(np.abs(shap_contribs))[::-1][:5]
         st.markdown("ℹ️ _Positive contributions raise the predicted risk; negative ones lower it._")
 
@@ -225,17 +325,12 @@ if submitted:
                 - {emoji} **{display_name}** contributed **{shap_val:+.3f}** to your risk → This {direction} risk due to a value of **{input_val}**
                 """)
 
-st.sidebar.markdown("Information")
-with st.sidebar.expander("Learn More"):
+with st.expander("Want to Learn More?"):
+    st.markdown("Diabetes/Prediabetes Resources")
     st.markdown("[CDC: Prediabetes Basics](https://www.cdc.gov/diabetes/prevention-type-2/prediabetes-prevent-type-2.html)", unsafe_allow_html=True)
-    st.markdown("[Diabetes Canada: Prediabetes](https://www.diabetes.ca/about-diabetes/prediabetes-1)", unsafe_allow_html=True)
     st.markdown("[WHO: Diabetes Overview](https://www.who.int/news-room/fact-sheets/detail/diabetes)", unsafe_allow_html=True)
-
-with st.sidebar.expander("What to Do Next?"):
-    st.markdown("""
-    - Talk to your doctor or a registered dietitian   
-    - Explore lifestyle changes like diet and exercise  
-    """)
+    st.markdown("[American Diabetes Association](https://diabetes.org/)", unsafe_allow_html=True)
+    st.markdown("[Diabetes Canada: Prediabetes](https://www.diabetes.ca/about-diabetes/prediabetes-1)", unsafe_allow_html=True)
 
 # --- Footer ---
 st.markdown("---")
