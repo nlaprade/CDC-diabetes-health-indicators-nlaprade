@@ -113,8 +113,9 @@ Changing the threshold means changing the sensitivity.
 - **Lower Threshold** → more samples classified as class 1 *(higher recall, lower precision)*  
 - **Higher Threshold** → fewer samples classified as class 1 *(lower recall, higher precision)*
 """)
-
-render_threshold_slider(thresholds)
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    render_threshold_slider(thresholds)
 
 # --- Use the confirmed model and threshold ---
 model = models[st.session_state.current_model]
