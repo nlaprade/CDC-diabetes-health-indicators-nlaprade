@@ -106,68 +106,56 @@ with st.sidebar:
             st.toast("⛔ Model switch cancelled")
             st.rerun()
 
-# --- Threshold Configuration ---
-st.markdown("## 🔧 Threshold Configuration")
-st.info("""
-Changing the threshold means changing the sensitivity.  
-- **Lower Threshold** → more samples classified as class 1 *(higher recall, lower precision)*  
-- **Higher Threshold** → fewer samples classified as class 1 *(lower recall, higher precision)*
-""")
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    render_threshold_slider(thresholds)
-
-# --- Use the confirmed model and threshold ---
-model = models[st.session_state.current_model]
-threshold = st.session_state.thresholds[st.session_state.current_model]
-
 # --- Tabs Layout ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Model Performance",
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🏠 Home",
     "📁 Dataset Info",
     "🧪 Feature Engineering",
     "💽 Model Overview",
-    "TEST"
+    "📊 Model Performance",
+    "🏁 Model Benchmark"
 ])
 
-# --- Tab 1: Model Performance ---
 with tab1:
-    st.subheader("🔢 Confusion Matrix")
-    metrics = compute_confusion_metrics(model, X_test, y_test, threshold)
-    breakdown = metrics["breakdown"]
+    st.markdown("""
+    ## Welcome to the Prediabetes Risk Explorer
 
-    # --- Initialize session state ---
-    if "show_raw_metrics" not in st.session_state:
-        st.session_state.show_raw_metrics = False
+    This personalized dashboard combines machine learning with clinical-grade interpretability  
+    to help you understand your estimated risk of prediabetes based on lifestyle, medical history, and socioeconomic factors.
 
-    # --- Toggle button logic ---
-    def toggle_metrics():
-        st.session_state.show_raw_metrics = not st.session_state.show_raw_metrics
+    It offers transparent explanations, dynamic visualizations, and interactive tools to support informed health decisions.
+    """)
+    st.caption("👆 Use the tabs above to explore key components of the home page.  " + "\n"
+    "👈 Use the navigation bar on the left to access the self predictor, SHAP analysis, interpretability guide, and interactive plots.")
+    st.markdown("---")
+    st.markdown("### 🔍 What You Can Explore")
+    
+    col1, col2, col3 = st.columns(3)
 
-    st.button(
-        f"Switch to {'Raw Counts' if not st.session_state.show_raw_metrics else 'Performance Metrics'}",
-        on_click=toggle_metrics
-    )
-
-    # --- Layout ---
-    col1, col2 = st.columns([1.5, 2.5])
     with col1:
-        st.markdown("### Confusion Matrix Breakdown")
-        if not st.session_state.show_raw_metrics:
-            st.metric("Accuracy", f"{metrics['accuracy']:.2%}")
-            st.metric("Precision", f"{metrics['precision']:.2%}")
-            st.metric("Recall", f"{metrics['recall']:.2%}")
-            st.metric("F1 Score", f"{metrics['f1']:.2%}")
-            st.metric("Specificity", f"{metrics['specificity']:.2%}")
-        else:
-            st.metric("True Positives (TP)", breakdown["TP"])
-            st.metric("True Negatives (TN)", breakdown["TN"])
-            st.metric("False Positives (FP)", breakdown["FP"])
-            st.metric("False Negatives (FN)", breakdown["FN"])
+        st.markdown("""
+        **🧠 Prediction & Personalization**
+        - Individual Risk Prediction  
+        - Threshold Tuning  
+        - Model Switching  
+        - Top Contributors  
+        """)
 
     with col2:
-         fig_cm = plot_confusion_matrix(metrics["confusion_matrix"])
-         st.pyplot(fig_cm, width='content')
+        st.markdown("""
+        **📊 Interpretability & Insights**
+        - SHAP Analysis (Global + Local)  
+        - Interactive Data Exploration  
+        - Confusion Matrix + Metrics  
+        - Risk Calibration Curve  
+        """)
+
+    with col3:
+        st.markdown("""
+        **🛠️ Utility & Export**
+        - Downloadable SHAP Scores  
+        - Benchmarking Across Models  
+        """)
 
 # --- Tab 2: Dataset Info ---
 with tab2:
@@ -214,18 +202,18 @@ with tab3:
             Each one reflects a meaningful combination or transformation of raw inputs tailored for prediabetes prediction.
             """)
         st.markdown("""
-        - **BMI_Outlier**: Flags extreme BMI values beyond ±3 standard deviations  
-        - **LowActivity_HighBMI**: No physical activity and BMI > 30  
-        - **LogBMI**: Log-transformed BMI for normalization  
-        - **Income_Age**: Ratio of income to age  
-        - **DistressCombo**: Weighted combo of mental + physical health burden  
-        - **SocioEconBurden**: Composite of low income, low education, and cost-related care avoidance  
-        - **LowEdu**: Flags education level ≤ 2  
-        - **BMI_GenHlth**: Interaction between BMI and general health rating  
-        - **CardioRisk**: Sum of cardiovascular risk indicators  
+        - `BMI_Outlier:` Flags extreme BMI values beyond ±3 standard deviations  
+        - `LowActivity_HighBMI:` No physical activity and BMI > 30  
+        - `LogBMI:` Log-transformed BMI for normalization  
+        - `Income_Age:` Ratio of income to age  
+        - `DistressCombo:` Weighted combo of mental + physical health burden  
+        - `SocioEconBurden:` Composite of low income, low education, and cost-related care avoidance  
+        - `LowEdu:` Flags education level ≤ 2  
+        - `BMI_GenHlth:` Interaction between BMI and general health rating  
+        - `CardioRisk:` Sum of cardiovascular risk indicators  
         """)
 
-# --- Model Overview ---
+# --- Tab 4: Model Overview ---
 with tab4:
     with  st.container(border=True):
         st.markdown("""
@@ -287,12 +275,62 @@ with tab4:
             - [Gradient Boosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)
             """)
 
-from sklearn.metrics import classification_report
-
+# --- Tab 5: Model Performance ---
 with tab5:
-    st.markdown("### 🏁 Model Benchmark")
+    st.subheader("🔢 Confusion Matrix")
+    # --- Threshold Configuration ---
+    st.markdown("## 🔧 Threshold Configuration")
+    st.info("""
+    Changing the threshold means changing the sensitivity.  
+    - **Lower Threshold** → more samples classified as class 1 *(higher recall, lower precision)*  
+    - **Higher Threshold** → fewer samples classified as class 1 *(lower recall, higher precision)*
+    """)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        render_threshold_slider(thresholds)
 
-    # Collect metrics per model
+    # --- Use the confirmed model and threshold ---
+    model = models[st.session_state.current_model]
+    threshold = st.session_state.thresholds[st.session_state.current_model]
+
+    metrics = compute_confusion_metrics(model, X_test, y_test, threshold)
+    breakdown = metrics["breakdown"]
+
+    # --- Initialize session state ---
+    if "show_raw_metrics" not in st.session_state:
+        st.session_state.show_raw_metrics = False
+
+    # --- Toggle button logic ---
+    def toggle_metrics():
+        st.session_state.show_raw_metrics = not st.session_state.show_raw_metrics
+
+    st.button(
+        f"Switch to {'Raw Counts' if not st.session_state.show_raw_metrics else 'Performance Metrics'}",
+        on_click=toggle_metrics
+    )
+
+    # --- Layout ---
+    col1, col2 = st.columns([1.5, 2.5])
+    with col1:
+        st.markdown("### Confusion Matrix Breakdown")
+        if not st.session_state.show_raw_metrics:
+            st.metric("Accuracy", f"{metrics['accuracy']:.2%}")
+            st.metric("Precision", f"{metrics['precision']:.2%}")
+            st.metric("Recall", f"{metrics['recall']:.2%}")
+            st.metric("F1 Score", f"{metrics['f1']:.2%}")
+            st.metric("Specificity", f"{metrics['specificity']:.2%}")
+        else:
+            st.metric("True Positives (TP)", breakdown["TP"])
+            st.metric("True Negatives (TN)", breakdown["TN"])
+            st.metric("False Positives (FP)", breakdown["FP"])
+            st.metric("False Negatives (FN)", breakdown["FN"])
+
+    with col2:
+         fig_cm = plot_confusion_matrix(metrics["confusion_matrix"])
+         st.pyplot(fig_cm, width='content')
+
+# --- Tab 6: Model Benchmark ---
+with tab6:
     benchmark_rows = []
     results = {}
     for name, model in models.items():

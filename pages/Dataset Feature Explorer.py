@@ -26,7 +26,7 @@ if "plot_uid" not in st.session_state:
     st.session_state.plot_uid = 0
 
 # --- Title and Caption ---
-st.title("🧮 Feature Explorer")
+st.title("Feature Explorer")
 st.caption("Explore feature relationships with a correlation heatmap and class-separated scatter plots.")
 
 # --- Heatmap Section ---
