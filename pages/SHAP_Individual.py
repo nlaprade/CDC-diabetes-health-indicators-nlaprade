@@ -13,6 +13,8 @@ from utils.predictor_utils import (
     binary_input, gender_input, education_input, income_input, age_input, compute_single_shap
 )
 
+os.environ["LOKY_MAX_CPU_COUNT"] = "8"
+
 shap.initjs()
 
 # --- Page Setup ---
@@ -29,7 +31,7 @@ model_paths = {
     "Gradient Boosting": os.path.join(MODEL_DIR, "gradientboosting_prediabetes_model.pkl")
 }
 models = load_all_models(model_paths)
-
+current_model = st.session_state.get("current_model", next(iter(models)))
 # --- Load Data & Preprocessing ---
 df = load_data(DATA_PATH)
 X_train, X_test, y_train, y_test, min_max = preprocessing(df)
@@ -91,74 +93,6 @@ with st.sidebar:
             st.session_state.model_switch_triggered = False
             st.toast("⛔ Model switch cancelled")
             st.rerun()
-
-# --- Load thresholds from file ---
-threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
-if os.path.exists(threshold_path):
-    loaded_thresholds = pickle.load(open(threshold_path, "rb"))
-else:
-    loaded_thresholds = {name: 0.5 for name in models}
-
-# --- Initialize thresholds dict ---
-if "thresholds" not in st.session_state:
-    st.session_state.thresholds = loaded_thresholds.copy()
-
-# --- Ensure current_model is set before using it ---
-current_model = st.session_state.get("current_model", next(iter(models)))
-
-# --- Ensure current_model has a threshold ---
-if current_model not in st.session_state.thresholds:
-    st.session_state.thresholds[current_model] = loaded_thresholds.get(current_model, 0.5)
-
-# --- Initialize slider value only after current_model is stable ---
-if "threshold_slider" not in st.session_state:
-    st.session_state.threshold_slider = st.session_state.thresholds[current_model]
-
-# Initialize previous threshold for toast tracking
-if "prev_threshold" not in st.session_state:
-    st.session_state.prev_threshold = st.session_state.threshold_slider
-
-# --- Sidebar: Threshold Slider ---
-with st.sidebar:
-    st.subheader("Set Model Threshold")
-
-    # Initialize slider value only if not already set
-    if "threshold_slider" not in st.session_state or st.session_state.model_switch_triggered:
-        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
-        st.session_state.model_switch_triggered = False  # reset trigger after sync
-
-    # Render slider using session state only (no value=)
-    threshold = st.slider(
-        "Threshold",
-        min_value=0.0,
-        max_value=1.0,
-        step=0.01,
-        key="threshold_slider"
-    )
-
-    # Show toast only if threshold changed and not just reset
-    if threshold != st.session_state.get("prev_threshold", threshold):
-        if not st.session_state.get("just_reset_thresholds", False):
-            st.toast(f"✅ Threshold changed to {threshold:.2f}")
-        st.session_state.prev_threshold = threshold
-
-    # Clear reset flag after use
-    if st.session_state.get("just_reset_thresholds", False):
-        del st.session_state["just_reset_thresholds"]
-
-    # Sync threshold to model
-    st.session_state.thresholds[current_model] = threshold
-
-    # --- Reset Button ---
-    if st.button("Reset Thresholds"):
-        st.session_state.thresholds = loaded_thresholds.copy()
-        st.session_state.just_reset_thresholds = True
-
-        # Reset slider for current model
-        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
-
-        st.toast("🔁 Thresholds reset to optimal value")
-        st.rerun()
 
 with st.container():
     with st.form("risk_form"):
@@ -319,12 +253,16 @@ if submitted:
             input_val = input_df.iloc[0][feature]
             direction = "increased" if shap_val > 0 else "decreased"
             emoji = "👎" if shap_val > 0 else "👍"
-
+            color = "#fa0000" if shap_val > 0 else "#35ff02"
             display_name = feature_aliases.get(feature, feature)
             st.markdown(f"""
-                - {emoji} **{display_name}** contributed **{shap_val:+.3f}** to your risk → This {direction} risk due to a value of **{input_val}**
-                """)
+<span style="color:{color}">
+{emoji} <strong>{display_name}</strong> contributed <strong>{shap_val:+.3f}</strong> to your risk → This increased risk due to a value of <strong>{input_val}</strong>
+</span>
+""", unsafe_allow_html=True)
 
+
+        st.markdown("---")
 with st.expander("Want to Learn More?"):
     st.markdown("Diabetes/Prediabetes Resources")
     st.markdown("[CDC: Prediabetes Basics](https://www.cdc.gov/diabetes/prevention-type-2/prediabetes-prevent-type-2.html)", unsafe_allow_html=True)

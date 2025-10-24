@@ -13,7 +13,10 @@ import shap
 from utils.paths import DATA_PATH, MODEL_DIR, IMAGES_DIR
 from utils.data_utils import load_data, preprocessing
 from utils.model_utils import load_all_models
-from utils.metrics_utils import compute_confusion_metrics, plot_confusion_matrix
+from utils.metrics_utils import compute_confusion_metrics, plot_confusion_matrix, render_threshold_slider
+from sklearn.metrics import classification_report
+
+os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
 shap.initjs()
 
@@ -26,7 +29,6 @@ st.set_page_config(
 
 st.title("CDC Prediabetes Classification Dashboard")
 st.caption("Built for clinical insight, model benchmarking, and transparent feature attribution.")
-
 
 # --- Load Models ---
 model_paths = {
@@ -44,7 +46,6 @@ X_train, X_test, y_train, y_test, min_max = preprocessing(df)
 
 # --- Load Thresholds ---
 threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
-
 if os.path.exists(threshold_path):
     with open(threshold_path, "rb") as f:
         thresholds = pickle.load(f)
@@ -61,7 +62,15 @@ if "temp_model" not in st.session_state:
 if "model_switch_triggered" not in st.session_state:
     st.session_state.model_switch_triggered = False
 
+if "thresholds" not in st.session_state:
+    st.session_state.thresholds = thresholds.copy()
+
+# Ensure slider is initialized with the correct model threshold
+if "threshold_slider" not in st.session_state:
+    current_model = st.session_state.current_model
+    st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
 # --- Callback to track selection change ---
+
 def on_model_change():
     st.session_state.model_switch_triggered = True
 
@@ -69,7 +78,6 @@ def on_model_change():
 with st.sidebar:
     st.subheader("Model Configuration")
 
-    # Model selector driven by temp_model
     st.selectbox(
         "Choose Model",
         list(models.keys()),
@@ -78,11 +86,9 @@ with st.sidebar:
         on_change=on_model_change
     )
 
-    # Update temp_model if user changed selection
     if st.session_state.model_switch_triggered:
         st.session_state.temp_model = st.session_state.model_selector
 
-    # Show confirm/cancel buttons only if temp_model differs from current_model
     if st.session_state.temp_model != st.session_state.current_model:
         st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
         confirm_switch = st.button("✅ Confirm Model Switch")
@@ -100,78 +106,28 @@ with st.sidebar:
             st.toast("⛔ Model switch cancelled")
             st.rerun()
 
-# --- Load thresholds from file ---
-threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
-if os.path.exists(threshold_path):
-    loaded_thresholds = pickle.load(open(threshold_path, "rb"))
-else:
-    loaded_thresholds = {name: 0.5 for name in models}
+# --- Threshold Configuration ---
+st.markdown("## 🔧 Threshold Configuration")
+st.info("""
+Changing the threshold means changing the sensitivity.  
+- **Lower Threshold** → more samples classified as class 1 *(higher recall, lower precision)*  
+- **Higher Threshold** → fewer samples classified as class 1 *(lower recall, higher precision)*
+""")
 
-# --- Initialize session state ---
-if "thresholds" not in st.session_state:
-    st.session_state.thresholds = loaded_thresholds.copy()
+render_threshold_slider(thresholds)
 
-# Ensure current model has a threshold
-current_model = st.session_state.current_model
-if current_model not in st.session_state.thresholds:
-    st.session_state.thresholds[current_model] = loaded_thresholds.get(current_model, 0.5)
-
-# Initialize slider value if missing
-if "threshold_slider" not in st.session_state:
-    st.session_state.threshold_slider = st.session_state.thresholds[current_model]
-
-# Initialize previous threshold for toast tracking
-if "prev_threshold" not in st.session_state:
-    st.session_state.prev_threshold = st.session_state.threshold_slider
-
-# --- Sidebar: Threshold Slider ---
-with st.sidebar:
-    st.subheader("Set Model Threshold")
-
-    # Initialize slider value only if not already set
-    if "threshold_slider" not in st.session_state or st.session_state.model_switch_triggered:
-        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
-        st.session_state.model_switch_triggered = False  # reset trigger after sync
-
-    # Render slider using session state only (no value=)
-    threshold = st.slider(
-        "Threshold",
-        min_value=0.0,
-        max_value=1.0,
-        step=0.01,
-        key="threshold_slider"
-    )
-
-    # Show toast only if threshold changed and not just reset
-    if threshold != st.session_state.get("prev_threshold", threshold):
-        if not st.session_state.get("just_reset_thresholds", False):
-            st.toast(f"✅ Threshold changed to {threshold:.2f}")
-        st.session_state.prev_threshold = threshold
-
-    # Clear reset flag after use
-    if st.session_state.get("just_reset_thresholds", False):
-        del st.session_state["just_reset_thresholds"]
-
-    # Sync threshold to model
-    st.session_state.thresholds[current_model] = threshold
-
-    # --- Reset Button ---
-    if st.button("Reset Thresholds"):
-        st.session_state.thresholds = loaded_thresholds.copy()
-        st.session_state.just_reset_thresholds = True
-
-        # Reset slider for current model
-        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
-
-        st.toast("🔁 Thresholds reset to optimal value")
-        st.rerun()
-
-# Use the confirmed model
+# --- Use the confirmed model and threshold ---
 model = models[st.session_state.current_model]
-#threshold = thresholds.get(st.session_state.current_model, 0.5)
+threshold = st.session_state.thresholds[st.session_state.current_model]
 
 # --- Tabs Layout ---
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Model Performance", "📁 Dataset Info", "🧪 Feature Engineering", "💽 Model Overview"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Model Performance",
+    "📁 Dataset Info",
+    "🧪 Feature Engineering",
+    "💽 Model Overview",
+    "TEST"
+])
 
 # --- Tab 1: Model Performance ---
 with tab1:
@@ -194,7 +150,6 @@ with tab1:
 
     # --- Layout ---
     col1, col2 = st.columns([1.5, 2.5])
-
     with col1:
         st.markdown("### Confusion Matrix Breakdown")
         if not st.session_state.show_raw_metrics:
@@ -215,11 +170,12 @@ with tab1:
 
 # --- Tab 2: Dataset Info ---
 with tab2:
-    st.markdown("""
-    - Source: [UCI Repository](https://archive.ics.uci.edu/dataset/891/cdc+diabetes+health+indicators)
-    - Over 250,000 U.S. adults surveyed
-    - Binary classification: Healthy (0) vs Prediabetes (1)
-    """)
+    with st.container(border=True):
+        st.markdown("""
+        - Source: [UCI Repository](https://archive.ics.uci.edu/dataset/891/cdc+diabetes+health+indicators)
+        - Over 250,000 U.S. adults surveyed
+        - Binary classification: Healthy (0) vs Prediabetes (1)
+        """)
 
     with st.expander("📘 Column Descriptions"):
         st.markdown("""
@@ -251,79 +207,157 @@ with tab2:
 
 # --- Tab 3: Feature Engineering ---
 with tab3:
-    st.markdown("""
-    These engineered features were designed to enhance clinical relevance, capture key risk interactions, and improve model interpretability.  
-    Each one reflects a meaningful combination or transformation of raw inputs tailored for prediabetes prediction.
-""")
-    st.markdown("""
-    - **BMI_Outlier**: Flags extreme BMI values beyond ±3 standard deviations  
-    - **LowActivity_HighBMI**: No physical activity and BMI > 30  
-    - **LogBMI**: Log-transformed BMI for normalization  
-    - **Income_Age**: Ratio of income to age  
-    - **DistressCombo**: Weighted combo of mental + physical health burden  
-    - **SocioEconBurden**: Composite of low income, low education, and cost-related care avoidance  
-    - **LowEdu**: Flags education level ≤ 2  
-    - **BMI_GenHlth**: Interaction between BMI and general health rating  
-    - **CardioRisk**: Sum of cardiovascular risk indicators  
-    """)
+    with st.container(border=True):
+        st.markdown("""
+            These engineered features were designed to enhance clinical relevance, capture key risk interactions, and improve model interpretability.  
+            Each one reflects a meaningful combination or transformation of raw inputs tailored for prediabetes prediction.
+            """)
+        st.markdown("""
+        - **BMI_Outlier**: Flags extreme BMI values beyond ±3 standard deviations  
+        - **LowActivity_HighBMI**: No physical activity and BMI > 30  
+        - **LogBMI**: Log-transformed BMI for normalization  
+        - **Income_Age**: Ratio of income to age  
+        - **DistressCombo**: Weighted combo of mental + physical health burden  
+        - **SocioEconBurden**: Composite of low income, low education, and cost-related care avoidance  
+        - **LowEdu**: Flags education level ≤ 2  
+        - **BMI_GenHlth**: Interaction between BMI and general health rating  
+        - **CardioRisk**: Sum of cardiovascular risk indicators  
+        """)
 
 # --- Model Overview ---
 with tab4:
-    st.markdown("""
-These models were chosen for their strong performance on structured health data and compatibility with SHAP for interpretability:
+    with  st.container(border=True):
+        st.markdown("""
+            These models were chosen for their strong performance on structured health data and compatibility with SHAP for interpretability:
 
-- **`XGBoost`**  
-  A high-performance gradient boosting model known for its accuracy and speed. Widely used in clinical machine learning tasks due to its robustness and SHAP support.
+            - **`XGBoost`**  
+            A high-performance gradient boosting model known for its accuracy and speed. Widely used in clinical machine learning tasks due to its robustness and SHAP support.
 
-- **`Random Forest`**  
-  An ensemble of decision trees that reduces overfitting and handles feature interactions well. Offers reliable performance and intuitive feature importance.
+            - **`Random Forest`**  
+            An ensemble of decision trees that reduces overfitting and handles feature interactions well. Offers reliable performance and intuitive feature importance.
 
-- **`Extra Trees`**  
-  Similar to Random Forest but uses more randomness during tree construction. Often faster and can improve generalization.
+            - **`Extra Trees`**  
+            Similar to Random Forest but uses more randomness during tree construction. Often faster and can improve generalization.
 
-- **`HistGradientBoosting`**  
-  A fast, scalable boosting model optimized for large datasets. Supports missing values natively and integrates well with SHAP.
+            - **`HistGradientBoosting`**  
+            A fast, scalable boosting model optimized for large datasets. Supports missing values natively and integrates well with SHAP.
 
-- **`Gradient Boosting`**  
-  A classic boosting method that builds trees sequentially to correct errors. Included for comparison with more modern variants.
+            - **`Gradient Boosting`**  
+            A classic boosting method that builds trees sequentially to correct errors. Included for comparison with more modern variants.
+            """)
 
----
+    with st.container(border=True):
+        st.markdown("""
+            ### Why These Models?
+            These models balance `predictive power`, `clinical transparency`, and `interpretability`, making them ideal for risk prediction in prediabetes.  
+            Each was tuned for depth, learning rate, and ensemble size using cross-validation.
 
-### Why These Models?
-These models balance `predictive power`, `clinical transparency`, and `interpretability`, making them ideal for risk prediction in prediabetes.  
-Each was tuned for depth, learning rate, and ensemble size using cross-validation.
+            - Thresholds were selected using precision-recall curves and F1 maximization  
+            - SHAP values were used to audit decision boundaries and promote borderline cases  
+            - Models were saved with calibrated thresholds for deployment stability
+            """)
 
-- Thresholds were selected using precision-recall curves and F1 maximization  
-- SHAP values were used to audit decision boundaries and promote borderline cases  
-- Models were saved with calibrated thresholds for deployment stability
+    with st.container(border=True):
+        st.markdown("""
+            ### Deployment Strategy
+            - All models were wrapped in a modular pipeline for reproducibility  
+            - SHAP explanations are rendered live for both global and local interpretability  
+            - Risk tiers (`Low`, `Moderate`, `High`, `Very High`) are assigned based on predicted probabilities and SHAP impact
+            """)
 
----
+    with st.container(border=True):
+        st.markdown("""
+            ### Model Evaluation Highlights
+            - **`Accuracy`** Consistently high across folds, with XGBoost and HistGradientBoosting leading  
+            - **`F1 Score`** Optimized for borderline cases to reduce false negatives in high-risk groups  
+            - **`Calibration`** Probability outputs checked for clinical reliability and interpretability  
+            - **`SHAP Insights`** Top predictors include BMI, Age, and Blood Pressure, which aligns with clinical evidence
 
-### Deployment Strategy
-- All models were wrapped in a modular pipeline for reproducibility  
-- SHAP explanations are rendered live for both global and local interpretability  
-- Risk tiers (`Low`, `Moderate`, `High`, `Very High`) are assigned based on predicted probabilities and SHAP impact
+            This approach ensures that predictions are not only accurate, but also explainable and clinically meaningful.
+            """)
 
----
+    with st.container(border=True):
+        st.markdown("""
+            ### Model Documentation
+            - [XGBoost](https://xgboost.readthedocs.io/en/latest/)
+            - [Random Forest (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)
+            - [Extra Trees (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesClassifier.html)
+            - [HistGradientBoosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingClassifier.html)
+            - [Gradient Boosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)
+            """)
 
-### Model Evaluation Highlights
-- **`Accuracy`** Consistently high across folds, with XGBoost and HistGradientBoosting leading  
-- **`F1 Score`** Optimized for borderline cases to reduce false negatives in high-risk groups  
-- **`Calibration`** Probability outputs checked for clinical reliability and interpretability  
-- **`SHAP Insights`** Top predictors include BMI, Age, and Blood Pressure, which aligns with clinical evidence
+from sklearn.metrics import classification_report
 
-This approach ensures that predictions are not only accurate, but also explainable and clinically meaningful.
+with tab5:
+    st.markdown("### 🏁 Model Benchmark")
 
----
+    # Collect metrics per model
+    benchmark_rows = []
+    results = {}
+    for name, model in models.items():
+        threshold = thresholds.get(name, 0.5)
+        metrics = compute_confusion_metrics(model, X_test, y_test, threshold=threshold)
+        benchmark_rows.append([
+            name,
+            f"{metrics['accuracy']:.2%}",
+            f"{metrics['precision']:.2%}",
+            f"{metrics['recall']:.2%}",
+            f"{metrics['f1']:.2%}"
+        ])
+        results[name] = {"recall": metrics["recall"]}
 
-### Model Documentation
-- [XGBoost](https://xgboost.readthedocs.io/en/latest/)
-- [Random Forest (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)
-- [Extra Trees (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.ExtraTreesClassifier.html)
-- [HistGradientBoosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingClassifier.html)
-- [Gradient Boosting (sklearn)](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)
-""")
-    
+    # Render as Markdown table (flush-left formatting)
+    table_header = (
+        "| Model Name           | Accuracy | Precision | Recall | F1 Score |\n"
+        "|----------------------|----------|-----------|--------|----------|"
+    )
+    table_rows = "\n".join([
+        f"| {row[0]:<20} | {row[1]} | {row[2]} | {row[3]} | {row[4]} |"
+        for row in benchmark_rows
+    ])
+    st.markdown(table_header + "\n" + table_rows)
+    best_score = max(results, key=lambda k: results[k]["recall"])
+    best_recall = results[best_score]["recall"]
+
+    st.success(f"🏆 Best Model by Recall: **{best_score}** ({best_recall:.2%})")
+
+    with st.expander("❓ Why Only Measure Recall?"):
+        with st.container():
+            st.markdown("""
+                ### 🎯 Why Focus on Recall
+
+                In this dashboard, we prioritize **recall** because our goal is to identify as many individuals at risk for prediabetes as possible.  
+                This may include flagging some false positives, but it ensures we catch nearly all true cases.
+                """)
+
+        with st.container():
+            st.markdown("""
+                #### ✅ What Recall Measures
+
+                - Recall quantifies how many actual prediabetes cases the model successfully detects.  
+                - A high recall means fewer false negatives. We avoid missing people who truly need further evaluation.
+                """)
+
+        with st.container():
+            st.markdown("""
+                #### 🧠 Why That Matters in Tiered Risk Systems
+
+                - This dashboard uses a **tiering system** after the initial prediction to stratify risk into categories such as low, moderate, and high.  
+                - By maximizing recall, we ensure that:
+                    - Potential cases are not missed at the first stage.  
+                    - Downstream logic, such as SHAP-based risk buckets or clinical review, can refine the signal.  
+                - In preventive medicine, missing a true positive is more costly than flagging a few extra false positives.
+                """)
+
+        with st.container():
+            st.markdown("""
+                #### 📊 Precision Tradeoff Is Acceptable
+
+                - Precision may decrease, meaning more false positives.  
+                - This is a strategic tradeoff. The tiering system acts as a **filter**, helping clinicians or downstream logic reclassify borderline cases with more context.
+                """)
+
+
 # --- Footer ---
 st.markdown("---")
 st.caption("Built by Nicholas Laprade — [LinkedIn](https://www.linkedin.com/in/nicholas-laprade) • [GitHub](https://github.com/nlaprade)")

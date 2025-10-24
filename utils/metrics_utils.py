@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import streamlit as st
 from sklearn.metrics import (
     confusion_matrix,
     ConfusionMatrixDisplay,
@@ -50,3 +51,45 @@ def plot_confusion_matrix(cm, figsize=(3, 3), title=""):
     ax.set_title(title)
     plt.tight_layout()
     return fig
+
+def render_threshold_slider(thresholds):
+    current_model = st.session_state.current_model
+
+    # Only initialize slider value before widget is rendered
+    if "threshold_slider" not in st.session_state:
+        st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
+
+    # Render slider using session state
+    threshold = st.slider(
+        label="Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        step=0.01,
+        key="threshold_slider",
+        label_visibility="collapsed")
+
+    # Toast on change
+    if threshold != st.session_state.get("prev_threshold", threshold):
+        if not st.session_state.get("just_reset_thresholds", False):
+            st.toast(f"✅ Threshold changed to {threshold:.2f}")
+        st.session_state.prev_threshold = threshold
+
+    # Clear reset flag
+    if st.session_state.get("just_reset_thresholds", False):
+        del st.session_state["just_reset_thresholds"]
+
+    # Sync threshold to model
+    st.session_state.thresholds[current_model] = threshold
+
+    # Reset button
+    if st.button("🔁 Reset Thresholds"):
+        # Update model threshold
+        st.session_state.thresholds = thresholds.copy()
+        st.session_state.just_reset_thresholds = True
+
+        # Remove slider key so it reinitializes on rerun
+        if "threshold_slider" in st.session_state:
+            del st.session_state["threshold_slider"]
+
+        st.toast("🔁 Thresholds reset to optimal value")
+        st.rerun()

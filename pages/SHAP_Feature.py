@@ -10,6 +10,8 @@ from utils.paths import DATA_PATH, MODEL_DIR, IMAGES_DIR
 from utils.data_utils import load_data, preprocessing
 from utils.model_utils import load_all_models
 
+os.environ["LOKY_MAX_CPU_COUNT"] = "8"
+
 shap.initjs()
 
 # --- Page Setup ---
@@ -83,7 +85,7 @@ with st.sidebar:
 
         if confirm_switch:
             st.session_state.current_model = st.session_state.temp_model
-            st.session_state.model_switch_triggered = False
+            st.session_state.model_switch_triggered = True  # triggers recompute
             st.toast(f"✅ Switched to {st.session_state.current_model}")
             st.rerun()
 
@@ -93,77 +95,13 @@ with st.sidebar:
             st.toast("⛔ Model switch cancelled")
             st.rerun()
 
-# --- Load thresholds from file ---
-threshold_path = os.path.join(MODEL_DIR, "thresholds.pkl")
-if os.path.exists(threshold_path):
-    loaded_thresholds = pickle.load(open(threshold_path, "rb"))
-else:
-    loaded_thresholds = {name: 0.5 for name in models}
-
-# --- Initialize thresholds dict ---
-if "thresholds" not in st.session_state:
-    st.session_state.thresholds = loaded_thresholds.copy()
-
-# --- Ensure current_model is set before using it ---
-current_model = st.session_state.get("current_model", next(iter(models)))
-
-# --- Ensure current_model has a threshold ---
-if current_model not in st.session_state.thresholds:
-    st.session_state.thresholds[current_model] = loaded_thresholds.get(current_model, 0.5)
-
-# --- Initialize slider value only after current_model is stable ---
-if "threshold_slider" not in st.session_state:
-    st.session_state.threshold_slider = st.session_state.thresholds[current_model]
-
-# Initialize previous threshold for toast tracking
-if "prev_threshold" not in st.session_state:
-    st.session_state.prev_threshold = st.session_state.threshold_slider
-
-# --- Sidebar: Threshold Slider ---
-with st.sidebar:
-    st.subheader("Set Model Threshold")
-
-    threshold = st.slider(
-        "Threshold",
-        min_value=0.0,
-        max_value=1.0,
-        step=0.01,
-        value=st.session_state.thresholds.get(current_model, 0.5),
-        key="threshold_slider"
-    )
-
-    # Show toast only if threshold changed and not just reset
-    if threshold != st.session_state.prev_threshold:
-        if not st.session_state.get("just_reset_thresholds", False):
-            st.toast(f"✅ Threshold changed to {threshold:.2f}")
-        st.session_state.prev_threshold = threshold
-
-    # Clear reset flag after use
-    if st.session_state.get("just_reset_thresholds", False):
-        del st.session_state["just_reset_thresholds"]
-
-    # Sync threshold to model
-    st.session_state.thresholds[current_model] = threshold
-
-    # --- Reset Button ---
-    if st.button("Reset Thresholds"):
-        st.session_state.thresholds = loaded_thresholds.copy()
-        st.session_state.just_reset_thresholds = True
-
-        # Reset slider for current model
-        if "threshold_slider" in st.session_state:
-            del st.session_state["threshold_slider"]
-
-        st.toast("🔁 Thresholds reset to optimal value")
-        st.rerun()
-
 # --- Finalize Model ---
 model = models[st.session_state.current_model]
 
 # --- Caching ---
 @st.cache_data
-def get_sample(X_test, model_name):
-    return X_test.sample(n=500, random_state=42)
+def get_sample(X_test, model_name, n):
+    return X_test.sample(n=n, random_state=42)
 
 @st.cache_resource
 def get_explainer(model_name, _model, X_train):
@@ -173,8 +111,32 @@ def get_explainer(model_name, _model, X_train):
 def get_shap_values(model_name, _explainer, X_sample):
     return _explainer(X_sample)
 
+# --- Sample Size Slider ---
+if "sample_size" not in st.session_state:
+    st.session_state.sample_size = 50  # default value
+
+if "prev_sample_size" not in st.session_state:
+    st.session_state.prev_sample_size = st.session_state.sample_size
+
+# --- Recompute Sample if Needed ---
+sample_size_changed = st.session_state.sample_size != st.session_state.prev_sample_size
+
+if (
+    "X_sample" not in st.session_state
+    or st.session_state.model_switch_triggered
+    or sample_size_changed
+):
+    st.session_state.X_sample = get_sample(
+        X_test,
+        st.session_state.current_model,
+        st.session_state.sample_size
+    )
+    st.session_state.model_switch_triggered = False
+    st.session_state.prev_sample_size = st.session_state.sample_size
+
+X_sample = st.session_state.X_sample
+
 # --- SHAP Computation ---
-X_sample = get_sample(X_test, st.session_state.current_model)
 explainer = get_explainer(st.session_state.current_model, model, X_train)
 shap_values = get_shap_values(st.session_state.current_model, explainer, X_sample)
 
@@ -251,19 +213,30 @@ with tab1:
         on_click=toggle_shap_plot
     )
 
-    st.markdown(f"Showing SHAP summary as **{st.session_state.shap_plot_type}** plot.")
+    col1, col2 = st.columns([1, 3])  # col1 is narrower
+    with col1:
+        st.session_state.sample_size = st.slider(
+            "Select number of samples",
+            min_value=10,
+            max_value=500,
+            value=st.session_state.sample_size,
+            step=10,
+            key="sample_size_slider"
+        )
 
-    plt.clf()
-    shap.summary_plot(
-        shap_array,
-        X_sample.values,
-        feature_names=np.array(X_sample.columns),
-        plot_type=st.session_state.shap_plot_type,
-        show=False
-    )
-    fig = plt.gcf()
-    fig.set_size_inches(12, 5.5)
-    st.pyplot(fig)
+    st.markdown(f"Showing SHAP summary as **{st.session_state.shap_plot_type}** plot.")
+    col1, col2 = st.columns(2)
+    with col1:
+        plt.clf()
+        shap.summary_plot(
+            shap_array,
+            X_sample.values,
+            feature_names=np.array(X_sample.columns),
+            plot_type=st.session_state.shap_plot_type,
+            show=False)
+        fig = plt.gcf()
+        fig.set_size_inches(12, 5.5)
+        st.pyplot(fig)
 
 # --- Tab 2: Dependence Plot ---
 with tab2:
@@ -275,22 +248,24 @@ with tab2:
 - Reveals nonlinear effects and feature interactions
 """)
 
-    col1, col2 = st.columns(2)
+    # Create columns for controls and plot side by side
+    col1, col2 = st.columns([1, 3])  # Adjust ratio if needed
+
     with col1:
         feature = st.selectbox("Feature to plot", importance_order, index=0)
-    with col2:
         color_feature = st.selectbox("Color by feature", X_sample.columns, index=1)
 
-    fig, ax = plt.subplots(figsize=(12, 5.5))
-    shap.dependence_plot(
-        feature,
-        shap_array,
-        X_sample,
-        interaction_index=color_feature,
-        ax=ax,
-        show=False
-    )
-    st.pyplot(fig)
+    with col2:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        shap.dependence_plot(
+            feature,
+            shap_array,
+            X_sample,
+            interaction_index=color_feature,
+            ax=ax,
+            show=False
+        )
+        st.pyplot(fig)
 
 # --- Tab 3: Decision Plot ---
 with tab3:
@@ -305,25 +280,28 @@ with tab3:
         expected_val = explainer.expected_value[0]
     else:
         expected_val = explainer.expected_value
-
-    plt.clf()
-    shap.decision_plot(
-        expected_val,
-        shap_array,
-        X_sample,
-        feature_names=list(X_sample.columns),
-        show=False
-    )
-    fig = plt.gcf()
-    fig.set_size_inches(12, 5.5)
-    st.pyplot(fig)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        plt.clf()
+        shap.decision_plot(
+            expected_val,
+            shap_array,
+            X_sample,
+            feature_names=list(X_sample.columns),
+            show=False)
+        fig = plt.gcf()
+        fig.set_size_inches(12, 10)
+        st.pyplot(fig)
 
 # --- Tab 4: Download SHAP Values ---
 with tab4:
+    col1, col2 = st.columns(2)
     st.markdown("### 📥 Download SHAP Values")
-
-    shap_df = pd.DataFrame(shap_array, columns=X_sample.columns)
-    st.dataframe(shap_df.head(10))
+    with col1:
+        shap_df = pd.DataFrame(shap_array, columns=X_sample.columns)
+        st.dataframe(shap_df.head(10))
 
     st.download_button(
         label="Download full SHAP values as CSV",
