@@ -10,3 +10,4 @@ ipython
 imbalanced-learn
 setuptools
 seaborn
+plotly
