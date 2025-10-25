@@ -126,7 +126,7 @@ with tab1:
     It offers transparent explanations, dynamic visualizations, and interactive tools to support informed health decisions.
     """)
     st.caption("👆 Use the tabs above to explore key components of the home page.  " + "\n"
-    "👈 Use the navigation bar on the left to access the self predictor, SHAP analysis, interpretability guide, and interactive plots.")
+    "👈 Use the navigation bar on the left to access the self predictor, SHAP analysis, and interactive plots.")
     st.markdown("---")
     st.markdown("### 🔍 What You Can Explore")
     
@@ -234,6 +234,77 @@ with tab4:
             - **`Gradient Boosting`**  
             A classic boosting method that builds trees sequentially to correct errors. Included for comparison with more modern variants.
             """)
+        
+        with st.expander("💪 Training Parameters Per Model"):
+    # --- XGBoost ---
+            with st.container(border=True):
+                st.markdown("### XGBoost")
+                st.markdown("""
+- `n_estimators`: 2500  
+- `learning_rate`: 0.005  
+- `max_depth`: 6  
+- `subsample`: 0.8  
+- `colsample_bytree`: 0.8  
+- `reg_alpha`: 0.1  
+- `reg_lambda`: 1.0  
+- `scale_pos_weight`: 2.0  
+- `random_state`: 42  
+- `eval_metric`: "logloss"
+        """)
+
+    # --- Random Forest ---
+            with st.container(border=True):
+                st.markdown("### Random Forest")
+                st.markdown("""
+- `n_estimators`: 1000  
+- `max_depth`: None  
+- `min_samples_leaf`: 10  
+- `max_features`: "sqrt"  
+- `class_weight`: "balanced"  
+- `random_state`: 42
+        """)
+
+    # --- Extra Trees ---
+            with st.container(border=True):
+                st.markdown("### Extra Trees")
+                st.markdown("""
+- `n_estimators`: 1000  
+- `max_depth`: None  
+- `min_samples_split`: 10  
+- `min_samples_leaf`: 10  
+- `max_features`: "sqrt"  
+- `random_state`: 42
+        """)
+
+    # --- HistGradientBoosting ---
+            with st.container(border=True):
+                st.markdown("### HistGradientBoosting")
+                st.markdown("""
+- `max_iter`: 2500  
+- `learning_rate`: 0.01  
+- `max_depth`: 6  
+- `l2_regularization`: 1.0  
+- `max_leaf_nodes`: 32  
+- `early_stopping`: True  
+- `validation_fraction`: 0.1  
+- `n_iter_no_change`: 50  
+- `random_state`: 42
+        """)
+
+    # --- Gradient Boosting ---
+            with st.container(border=True):
+                st.markdown("### Gradient Boosting")
+                st.markdown("""
+- `n_estimators`: 1000  
+- `learning_rate`: 0.005  
+- `subsample`: 0.8  
+- `max_depth`: 6  
+- `min_samples_split`: 10  
+- `min_samples_leaf`: 20  
+- `validation_fraction`: 0.1  
+- `n_iter_no_change`: 50  
+- `random_state`: 42
+        """)
 
     with st.container(border=True):
         st.markdown("""
@@ -363,7 +434,7 @@ with tab6:
     with st.expander("❓ Why Only Measure Recall?"):
         with st.container():
             st.markdown("""
-                ### 🎯 Why Focus on Recall
+                #### 🎯 Why Focus on Recall
 
                 In this dashboard, we prioritize **recall** because our goal is to identify as many individuals at risk for prediabetes as possible.  
                 This may include flagging some false positives, but it ensures we catch nearly all true cases.
