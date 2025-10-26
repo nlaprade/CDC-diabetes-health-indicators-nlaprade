@@ -207,7 +207,17 @@ if submitted:
 
     with tab2:
         shap_contribs, feature_names = compute_single_shap(models[current_model], input_df)
-        shap_contribs = shap_contribs.flatten()
+        
+        if shap_contribs.ndim == 2:
+            if shap_contribs.shape[0] == 1:
+                shap_contribs = shap_contribs.flatten()
+            elif shap_contribs.shape[0] == models[current_model].n_classes_:
+                pred_class = models[current_model].predict(input_df)[0]
+                hap_contribs = shap_contribs[pred_class]
+            else:
+                st.error(f"Unexpected SHAP shape: {shap_contribs.shape}")
+                st.stop()
+
         top_indices = np.argsort(np.abs(shap_contribs))[::-1][:5]
         st.markdown("ℹ️ _Positive contributions raise the predicted risk; negative ones lower it._")
 
