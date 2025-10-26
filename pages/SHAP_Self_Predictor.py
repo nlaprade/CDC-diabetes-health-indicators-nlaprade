@@ -210,10 +210,10 @@ if submitted:
         
         if shap_contribs.ndim == 2:
             if shap_contribs.shape[0] == len(feature_names) and shap_contribs.shape[1] == models[current_model].n_classes_:
-                # Transpose to (n_classes, n_features)
-                shap_contribs = shap_contribs.T
-                pred_class = models[current_model].predict(input_df)[0]
-                shap_contribs = shap_contribs[pred_class]
+                pred_label = models[current_model].predict(input_df)[0]
+                class_names = list(models[current_model].classes_)
+                pred_class_idx = class_names.index(pred_label)
+                shap_contribs = shap_contribs[pred_class_idx]
             elif shap_contribs.shape[0] == 1:
                 shap_contribs = shap_contribs.flatten()
             else:
