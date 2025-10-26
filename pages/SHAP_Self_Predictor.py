@@ -209,7 +209,7 @@ if submitted:
         shap_contribs, feature_names = compute_single_shap(models[current_model], input_df)
         
         if shap_contribs.ndim == 2:
-            if shap_contribs.shape[1] == models[current_model].n_classes_:
+            if shap_contribs.shape[0] == len(feature_names) and shap_contribs.shape[1] == models[current_model].n_classes_:
                 # Transpose to (n_classes, n_features)
                 shap_contribs = shap_contribs.T
                 pred_class = models[current_model].predict(input_df)[0]
