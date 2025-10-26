@@ -13,8 +13,7 @@ import shap
 from utils.paths import DATA_PATH, MODEL_DIR, IMAGES_DIR
 from utils.data_utils import load_data, preprocessing
 from utils.model_utils import load_all_models
-from utils.metrics_utils import compute_confusion_metrics, plot_confusion_matrix, render_threshold_slider
-from sklearn.metrics import classification_report
+from utils.metrics_utils import compute_confusion_metrics, plot_confusion_matrix, render_threshold_slider, render_model_change
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
@@ -71,40 +70,7 @@ if "threshold_slider" not in st.session_state:
     st.session_state.threshold_slider = st.session_state.thresholds.get(current_model, 0.5)
 # --- Callback to track selection change ---
 
-def on_model_change():
-    st.session_state.model_switch_triggered = True
-
-# --- Sidebar Content ---
-with st.sidebar:
-    st.subheader("Model Configuration")
-
-    st.selectbox(
-        "Choose Model",
-        list(models.keys()),
-        index=list(models.keys()).index(st.session_state.temp_model),
-        key="model_selector",
-        on_change=on_model_change
-    )
-
-    if st.session_state.model_switch_triggered:
-        st.session_state.temp_model = st.session_state.model_selector
-
-    if st.session_state.temp_model != st.session_state.current_model:
-        st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
-        confirm_switch = st.button("✅ Confirm Model Switch")
-        cancel_switch = st.button("⛔ Cancel Model Change")
-
-        if confirm_switch:
-            st.session_state.current_model = st.session_state.temp_model
-            st.session_state.model_switch_triggered = False
-            st.toast(f"✅ Switched to {st.session_state.current_model}")
-            st.rerun()
-
-        elif cancel_switch:
-            st.session_state.temp_model = st.session_state.current_model
-            st.session_state.model_switch_triggered = False
-            st.toast("⛔ Model switch cancelled")
-            st.rerun()
+render_model_change(models)
 
 # --- Tabs Layout ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([

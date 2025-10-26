@@ -9,9 +9,10 @@ import pickle
 from utils.paths import DATA_PATH, MODEL_DIR, IMAGES_DIR
 from utils.data_utils import load_data, preprocessing
 from utils.model_utils import load_all_models
+from utils.metrics_utils import render_model_change
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
-
+st.set_option("client.showErrorDetails", False)
 shap.initjs()
 
 # --- Page Setup ---
@@ -56,48 +57,7 @@ if "temp_model" not in st.session_state:
 if "model_switch_triggered" not in st.session_state:
     st.session_state.model_switch_triggered = False
 
-# --- Callback to track selection change ---
-def on_model_change():
-    st.session_state.model_switch_triggered = True
-
-def on_sample_size_change():
-    st.session_state.prev_sample_size = -1
-    st.rerun()
-
-# --- Sidebar Content ---
-with st.sidebar:
-    st.subheader("Model Configuration")
-
-    # Model selector driven by temp_model
-    st.selectbox(
-        "Choose Model",
-        list(models.keys()),
-        index=list(models.keys()).index(st.session_state.temp_model),
-        key="model_selector",
-        on_change=on_model_change
-    )
-
-    # Update temp_model if user changed selection
-    if st.session_state.model_switch_triggered:
-        st.session_state.temp_model = st.session_state.model_selector
-
-    # Show confirm/cancel buttons only if temp_model differs from current_model
-    if st.session_state.temp_model != st.session_state.current_model:
-        st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
-        confirm_switch = st.button("✅ Confirm Model Switch")
-        cancel_switch = st.button("⛔ Cancel Model Change")
-
-        if confirm_switch:
-            st.session_state.current_model = st.session_state.temp_model
-            st.session_state.model_switch_triggered = True  # triggers recompute
-            st.toast(f"✅ Switched to {st.session_state.current_model}")
-            st.rerun()
-
-        elif cancel_switch:
-            st.session_state.temp_model = st.session_state.current_model
-            st.session_state.model_switch_triggered = False
-            st.toast("⛔ Model switch cancelled")
-            st.rerun()
+render_model_change(models)
 
 # --- Finalize Model ---
 model = models[st.session_state.current_model]
@@ -115,12 +75,11 @@ def get_explainer(model_name, _model, X_train):
 def get_shap_values(model_name, _explainer, X_sample):
     return _explainer(X_sample)
 
-# --- Sample Size Slider ---
-if "sample_size" not in st.session_state:
-    st.session_state.sample_size = 50  # default value
-
 if "prev_sample_size" not in st.session_state:
-    st.session_state.prev_sample_size = st.session_state.sample_size
+    st.session_state.prev_sample_size = 50
+
+if "sample_size" not in st.session_state:
+    st.session_state.sample_size = 50
 
 # --- Recompute Sample if Needed ---
 sample_size_changed = st.session_state.sample_size != st.session_state.prev_sample_size
@@ -180,19 +139,14 @@ importance_order = (
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "🔎 SHAP Overview"
 
-def set_active_tab(tab_name: str):
-    st.session_state.active_tab = tab_name
-    st.rerun()
-
-tabs = {
-    "🔎 SHAP Overview": "tab1",
-    "📊 SHAP Summary": "tab2",
-    "📈 Dependence Plot": "tab3",
-    "🕹️ Decision Plot": "tab4",
-    "📥 Download SHAP Values": "tab5"
-}
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(list(tabs.keys()))
+# --- Tabs ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🔎 SHAP Overview",
+    "📊 SHAP Summary",
+    "📈 Dependence Plot",
+    "🕹️ Decision Plot",
+    "📥 Download SHAP Values"
+])
 
 # --- Tab 1: SHAP Overview ---
 with tab1:
@@ -244,12 +198,16 @@ By analyzing how this value changes when features are added or removed, SHAP ass
 This visual helps explain why SHAP is grounded in cooperative game theory and how it ensures consistent, additive explanations.
 """)
 
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "🔎 SHAP Overview"
 
-
+def on_sample_size_change():
+    st.session_state.active_tab = "📊 SHAP Summary"
 
 # --- Tab 2: SHAP Summary ---
 with tab2:
-        st.session_state.active_tab = "📊 SHAP Summary"
+        if st.session_state.active_tab != "📊 SHAP Summary":
+            st.session_state.active_tab = "📊 SHAP Summary"
 
         st.markdown(
             "### 🔎 SHAP Summary Plot")
@@ -279,10 +237,12 @@ with tab2:
                 "Select number of samples",
                 min_value=10,
                 max_value=500,
-                value=st.session_state.sample_size,
                 step=10,
-                key="sample_size"
+                key="sample_size",
+                on_change=on_sample_size_change
             )
+
+
 
             st.markdown(
                 f"Showing SHAP summary as **{st.session_state.shap_plot_type}** plot "
@@ -406,7 +366,7 @@ with tab4:
         )
         fig = plt.gcf()
         fig.set_size_inches(12, 10)
-        st.pyplot(fig, use_container_width=False)
+        st.pyplot(fig, width='content')
 
     with col2:
         with st.container(border=True):

@@ -12,6 +12,7 @@ from utils.model_utils import load_all_models
 from utils.predictor_utils import (
     binary_input, gender_input, education_input, income_input, age_input, compute_single_shap
 )
+from utils.metrics_utils import render_model_change
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
@@ -59,40 +60,7 @@ if "model_switch_triggered" not in st.session_state:
 def on_model_change():
     st.session_state.model_switch_triggered = True
 
-# --- Sidebar Content ---
-with st.sidebar:
-    st.subheader("Model Configuration")
-
-    # Model selector driven by temp_model
-    st.selectbox(
-        "Choose Model",
-        list(models.keys()),
-        index=list(models.keys()).index(st.session_state.temp_model),
-        key="model_selector",
-        on_change=on_model_change
-    )
-
-    # Update temp_model if user changed selection
-    if st.session_state.model_switch_triggered:
-        st.session_state.temp_model = st.session_state.model_selector
-
-    # Show confirm/cancel buttons only if temp_model differs from current_model
-    if st.session_state.temp_model != st.session_state.current_model:
-        st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
-        confirm_switch = st.button("✅ Confirm Model Switch")
-        cancel_switch = st.button("⛔ Cancel Model Change")
-
-        if confirm_switch:
-            st.session_state.current_model = st.session_state.temp_model
-            st.session_state.model_switch_triggered = False
-            st.toast(f"✅ Switched to {st.session_state.current_model}")
-            st.rerun()
-
-        elif cancel_switch:
-            st.session_state.temp_model = st.session_state.current_model
-            st.session_state.model_switch_triggered = False
-            st.toast("⛔ Model switch cancelled")
-            st.rerun()
+render_model_change(models)
 
 with st.container():
     with st.form("risk_form"):
@@ -239,6 +207,7 @@ if submitted:
 
     with tab2:
         shap_contribs, feature_names = compute_single_shap(models[current_model], input_df)
+        shap_contribs = shap_contribs.flatten()
         top_indices = np.argsort(np.abs(shap_contribs))[::-1][:5]
         st.markdown("ℹ️ _Positive contributions raise the predicted risk; negative ones lower it._")
 

@@ -6,6 +6,7 @@ from utils.paths import IMAGES_DIR, DATA_PATH, MODEL_DIR
 from utils.plot_utils import plot_xy_selector, get_corr_matrix
 from utils.data_utils import load_data
 from utils.model_utils import load_all_models
+from utils.metrics_utils import render_model_change
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
@@ -40,37 +41,7 @@ if "model_switch_triggered" not in st.session_state:
 def on_model_change():
     st.session_state.model_switch_triggered = True
 
-# --- Sidebar Content ---
-with st.sidebar:
-    st.subheader("Model Configuration")
-
-    st.selectbox(
-        "Choose Model",
-        list(models.keys()),
-        index=list(models.keys()).index(st.session_state.temp_model),
-        key="model_selector",
-        on_change=on_model_change
-    )
-
-    if st.session_state.model_switch_triggered:
-        st.session_state.temp_model = st.session_state.model_selector
-
-    if st.session_state.temp_model != st.session_state.current_model:
-        st.warning("⚠️ Switching models may take time on cloud-hosted dashboards.")
-        confirm_switch = st.button("✅ Confirm Model Switch")
-        cancel_switch = st.button("⛔ Cancel Model Change")
-
-        if confirm_switch:
-            st.session_state.current_model = st.session_state.temp_model
-            st.session_state.model_switch_triggered = False
-            st.toast(f"✅ Switched to {st.session_state.current_model}")
-            st.rerun()
-
-        elif cancel_switch:
-            st.session_state.temp_model = st.session_state.current_model
-            st.session_state.model_switch_triggered = False
-            st.toast("⛔ Model switch cancelled")
-            st.rerun()
+render_model_change(models)
 
 # --- Load Data ---
 df = load_data(DATA_PATH)
